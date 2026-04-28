@@ -1,0 +1,43 @@
+name: Health Report
+
+on:
+  push:
+    paths:
+      - "logs/**"
+      - "scripts/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate weight graph
+        run: python scripts/plot_weight.py
+
+      - name: Generate blood pressure graph
+        run: python scripts/plot_blood_pressure.py
+
+      - name: Analyze health
+        run: python scripts/analyze_health.py
+
+      - name: Commit reports
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add reports/
+          git commit -m "auto update reports" || echo "No changes"
+          git push
