@@ -23,10 +23,12 @@
 - 夜食・間食の回数
 - 歩いた日数
 
-## Weight Report
+## Health Analysis
 
 ![Weight Report](reports/weight.png)
 
-## Blood Pressure
+![Blood Pressure Trend](reports/blood_pressure.png)
 
-![BP](reports/blood_pressure.png)
+<!-- HEALTH_ANALYSIS_START -->
+
+<!-- HEALTH_ANALYSIS_END -->
