@@ -2,42 +2,38 @@ name: Health Report
 
 on:
   push:
-    paths:
-      - "logs/**"
-      - "scripts/**"
-      - ".github/workflows/**"
-  workflow_dispatch:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
-  generate-report:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install deps
+        run: pip install pandas matplotlib
 
-      - name: Generate weight graph
-        run: python scripts/plot_weight.py
-
-      - name: Generate blood pressure graph
-        run: python scripts/plot_blood_pressure.py
-
-      - name: Analyze health
-        run: python scripts/analyze_health.py
-
-      - name: Commit reports
+      - name: Generate reports
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add reports/
-          git commit -m "auto update reports" || echo "No changes"
+          python scripts/plot_blood_pressure.py
+          python scripts/analyze_health.py
+          python scripts/update_readme.py
+
+      - name: Commit updated reports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add README.md reports/health_analysis.md reports/blood_pressure.png
+          git commit -m "Update health report [skip ci]" || echo "No changes to commit"
           git push
