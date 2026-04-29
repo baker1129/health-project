@@ -5,8 +5,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 
-WEIGHT_CSV = ROOT / "logs" / "weight.csv"
-BP_CSV = ROOT / "logs" / "blood_pressure.csv"
+WEIGHT_CSV = ROOT / "logs" / "daily" / "weight.csv"
+BP_CSV = ROOT / "logs" / "daily" / "blood_pressure.csv"
 
 
 def load_weight() -> pd.DataFrame:
