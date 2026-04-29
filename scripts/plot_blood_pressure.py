@@ -1,101 +1,90 @@
 from pathlib import Path
+
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
 
 ROOT = Path(__file__).resolve().parents[1]
-FILE = ROOT / "logs" / "blood_pressure.csv"
+BP_CSV = ROOT / "logs" / "daily" / "blood_pressure.csv"
 REPORT_DIR = ROOT / "reports"
 OUTPUT = REPORT_DIR / "blood_pressure.png"
 
 
-def load_data():
-    df = pd.read_csv(FILE)
+def load_data() -> pd.DataFrame:
+    df = pd.read_csv(BP_CSV)
 
-    df["date"] = pd.to_datetime(df["date"])
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["systolic"] = pd.to_numeric(df["systolic"], errors="coerce")
     df["diastolic"] = pd.to_numeric(df["diastolic"], errors="coerce")
 
+    if "pulse" in df.columns:
+        df["pulse"] = pd.to_numeric(df["pulse"], errors="coerce")
+
     df = df.dropna(subset=["date", "systolic", "diastolic"])
+    df = df.sort_values("date")
 
     return df
 
 
-def daily_average(df):
-    daily = df.groupby("date").agg({
-        "systolic": "mean",
-        "diastolic": "mean"
-    }).reset_index()
+def daily_average(df: pd.DataFrame) -> pd.DataFrame:
+    daily = (
+        df.groupby("date", as_index=False)
+        .agg(
+            systolic=("systolic", "mean"),
+            diastolic=("diastolic", "mean"),
+        )
+        .sort_values("date")
+    )
 
-    daily["sys_7d"] = daily["systolic"].rolling(7, min_periods=1).mean()
-    daily["dia_7d"] = daily["diastolic"].rolling(7, min_periods=1).mean()
+    daily["sys_7d"] = daily["systolic"].rolling(window=7, min_periods=1).mean()
+    daily["dia_7d"] = daily["diastolic"].rolling(window=7, min_periods=1).mean()
 
     return daily
 
 
-def evaluate(df):
-    if len(df) < 7:
-        return "データ不足"
+def main() -> None:
+    REPORT_DIR.mkdir(exist_ok=True)
 
-    sys = df["sys_7d"].iloc[-1]
-    dia = df["dia_7d"].iloc[-1]
+    raw = load_data()
+    df = daily_average(raw)
 
-    if sys >= 140 or dia >= 90:
-        return "血圧高め ⚠️ 要改善"
-    elif sys >= 130 or dia >= 85:
-        return "やや高め 注意"
-    else:
-        return "良好 👍"
+    if df.empty:
+        raise ValueError("No valid blood pressure data found in logs/daily/blood_pressure.csv")
 
-
-def detect_trend(df):
-    if len(df) < 7:
-        return "判定不可"
-
-    latest = df["sys_7d"].iloc[-1]
-    past = df["sys_7d"].iloc[-7]
-
-    diff = latest - past
-
-    if diff > 5:
-        return f"上昇傾向（+{diff:.1f}）⚠️"
-    elif diff < -5:
-        return f"下降傾向（{diff:.1f}）👍"
-    else:
-        return "横ばい"
-
-
-def plot(df):
     plt.figure(figsize=(10, 5))
 
-    plt.plot(df["date"], df["systolic"], label="Systolic", marker="o")
-    plt.plot(df["date"], df["sys_7d"], label="Sys 7d avg")
+    plt.plot(df["date"], df["systolic"], marker="o", label="Systolic")
+    plt.plot(df["date"], df["diastolic"], marker="o", label="Diastolic")
+    plt.plot(df["date"], df["sys_7d"], marker="o", label="Systolic 7-day avg")
+    plt.plot(df["date"], df["dia_7d"], marker="o", label="Diastolic 7-day avg")
 
-    plt.axhline(140, linestyle="--", label="High (140)")
-    plt.axhline(130, linestyle="--", label="Warning (130)")
+    # 目安ライン
+    plt.axhline(140, linestyle="--", label="Systolic high: 140")
+    plt.axhline(90, linestyle="--", label="Diastolic high: 90")
+    plt.axhline(130, linestyle=":", label="Systolic caution: 130")
+    plt.axhline(85, linestyle=":", label="Diastolic caution: 85")
+
+    # X軸を実データ範囲に合わせる
+    start = df["date"].min() - pd.Timedelta(days=1)
+    end = df["date"].max() + pd.Timedelta(days=1)
+    plt.xlim(start, end)
+
+    # 日付表示を見やすくする
+    ax = plt.gca()
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    plt.xticks(rotation=45)
 
     plt.title("Blood Pressure Trend")
     plt.xlabel("Date")
     plt.ylabel("mmHg")
-    plt.legend()
     plt.grid(True)
+    plt.legend()
     plt.tight_layout()
 
     plt.savefig(OUTPUT)
-
-
-def main():
-    REPORT_DIR.mkdir(exist_ok=True)
-
-    df = load_data()
-    daily = daily_average(df)
-
-    status = evaluate(daily)
-    trend = detect_trend(daily)
-
-    print(status)
-    print(trend)
-
-    plot(daily)
+    print(f"Saved: {OUTPUT}")
 
 
 if __name__ == "__main__":
