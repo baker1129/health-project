@@ -25,6 +25,7 @@ jobs:
 
       - name: Generate reports
         run: |
+          python scripts/plot_weight.py
           python scripts/plot_blood_pressure.py
           python scripts/analyze_health.py
           python scripts/update_readme.py
