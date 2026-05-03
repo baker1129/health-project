@@ -139,6 +139,104 @@ function appendExercise(src, date, exercise) {
   return src.trimEnd() + '\n\n---\n\n' + `## ${date}\n- ${exercise.trim()}\n`;
 }
 
+// ── Existing data parsers ─────────────────────────────────────────────────────
+
+function parseWeight(src, date) {
+  const line = src.split('\n').find(l => l.startsWith(date + ','));
+  if (!line) return null;
+  const [, weight, bodyfat] = line.split(',');
+  return { weight: weight || '', bodyfat: (bodyfat || '').trim() };
+}
+
+function parseBPRow(src, date, time) {
+  const line = src.split('\n').find(l => l.startsWith(`${date},${time},`));
+  if (!line) return null;
+  const [,, s1, d1, p1, s2, d2, p2, ...memoParts] = line.split(',');
+  const bp1 = `${s1}/${d1}/${p1}`;
+  const bp2 = `${s2}/${d2}/${p2}`;
+  const memo = memoParts.join(',');
+  const cpap = memo.includes('cpap:on') ? 'on' : memo.includes('cpap:off') ? 'off' : '';
+  return { bp1, bp2: bp1 === bp2 ? '' : bp2, cpap };
+}
+
+function parseDateSection(src, date) {
+  const idx = src.indexOf(`## ${date}`);
+  if (idx === -1) return null;
+  const after = src.slice(idx + `## ${date}`.length);
+  const end = after.search(/\n## /);
+  return end === -1 ? after : after.slice(0, end);
+}
+
+function extractSubsection(section, heading) {
+  const idx = section.indexOf(`### ${heading}`);
+  if (idx === -1) return '';
+  const after = section.slice(idx + `### ${heading}`.length);
+  const next = after.search(/\n###/);
+  const block = next === -1 ? after : after.slice(0, next);
+  return block
+    .split('\n')
+    .filter(l => l.trim().startsWith('- '))
+    .map(l => l.trim().slice(2).trim())
+    .filter(Boolean)
+    .join('、');
+}
+
+// ── Load existing data ────────────────────────────────────────────────────────
+
+function setLoadIndicator(on) {
+  $('load-indicator').classList.toggle('hidden', !on);
+}
+
+async function loadForDate(date) {
+  if (!cfg.token || !date) return;
+  setLoadIndicator(true);
+
+  try {
+    const [wFile, bpFile, mealsFile, exFile] = await Promise.all([
+      ghGet('logs/daily/weight.csv'),
+      ghGet('logs/daily/blood_pressure.csv'),
+      ghGet('logs/lifestyle/meals.md'),
+      ghGet('logs/lifestyle/exercise.md'),
+    ]);
+
+    // Weight
+    const w = parseWeight(wFile.content, date);
+    $('weight').value  = w?.weight  || '';
+    $('bodyfat').value = w?.bodyfat || '';
+
+    // Morning BP
+    const am = parseBPRow(bpFile.content, date, 'morning');
+    $('am-bp1').value = am?.bp1 || '';
+    $('am-bp2').value = am?.bp2 || '';
+    const cpapVal = am?.cpap || '';
+    document.querySelector(`input[name="cpap"][value="${cpapVal}"]`).checked = true;
+
+    // Night BP
+    const pm = parseBPRow(bpFile.content, date, 'night');
+    $('pm-bp1').value = pm?.bp1 || '';
+    $('pm-bp2').value = pm?.bp2 || '';
+
+    // Meals
+    const mealsSection = parseDateSection(mealsFile.content, date);
+    $('breakfast').value = mealsSection ? extractSubsection(mealsSection, '朝')    : '';
+    $('lunch').value     = mealsSection ? extractSubsection(mealsSection, '昼')    : '';
+    $('dinner').value    = mealsSection ? extractSubsection(mealsSection, '夜')    : '';
+    $('food-note').value = mealsSection ? extractSubsection(mealsSection, '気づき') : '';
+
+    // Exercise
+    const exSection = parseDateSection(exFile.content, date);
+    $('exercise').value = exSection
+      ? exSection.split('\n').filter(l => l.trim().startsWith('- '))
+          .map(l => l.trim().slice(2).trim()).filter(Boolean).join('、')
+      : '';
+
+  } catch (e) {
+    console.error('load error:', e);
+  }
+
+  setLoadIndicator(false);
+}
+
 // ── Submit ────────────────────────────────────────────────────────────────────
 async function submit() {
   if (!cfg.token) {
@@ -273,5 +371,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === $('settings-modal')) closeSettings();
   });
 
-  if (!cfg.token) openSettings();
+  if (!cfg.token) {
+    openSettings();
+  } else {
+    loadForDate($('date').value);
+  }
+
+  $('date').addEventListener('change', e => loadForDate(e.target.value));
 });

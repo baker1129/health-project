@@ -160,6 +160,14 @@ input[type="radio"] {
 
 .bottom-space { height: 40px; }
 
+.load-indicator {
+  font-size: 12px;
+  color: var(--accent);
+  text-align: center;
+  padding: 2px 0;
+}
+.load-indicator.hidden { display: none; }
+
 /* ── Settings modal ── */
 .modal {
   position: fixed;
