@@ -1,6 +1,10 @@
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -198,6 +202,86 @@ def detect_pulse_anomaly() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# CPAP着用有無×朝血圧分析
+# ---------------------------------------------------------------------------
+
+def analyze_cpap() -> dict[str, str]:
+    df = load_blood_pressure_raw()
+    df_m = df[df["time"] == "morning"].copy()
+
+    _no_data = {
+        "usage": "記録なし",
+        "on_sys": "—",
+        "off_sys": "—",
+        "diff": "—",
+        "note": "",
+        "console": "CPAP分析: 記録なし",
+    }
+
+    if df_m.empty or "memo" not in df_m.columns:
+        return _no_data
+
+    def _parse_cpap(val: str):
+        v = str(val).strip().lower()
+        if "cpap:on" in v:
+            return True
+        if "cpap:off" in v:
+            return False
+        return None
+
+    df_m["cpap_on"] = df_m["memo"].fillna("").map(_parse_cpap)
+    df_rec = df_m.dropna(subset=["cpap_on"])
+
+    if df_rec.empty:
+        return _no_data
+
+    total     = len(df_rec)
+    on_count  = int(df_rec["cpap_on"].sum())
+    usage_pct = on_count / total * 100
+    usage_text = f"{on_count}/{total}日 ({usage_pct:.0f}%)"
+
+    df_on  = df_rec[df_rec["cpap_on"] == True]
+    df_off = df_rec[df_rec["cpap_on"] == False]
+
+    on_sys  = df_on["systolic"].mean()  if not df_on.empty  else float("nan")
+    off_sys = df_off["systolic"].mean() if not df_off.empty else float("nan")
+
+    on_sys_text  = f"{on_sys:.1f} mmHg"  if not pd.isna(on_sys)  else "データなし"
+    off_sys_text = f"{off_sys:.1f} mmHg" if not pd.isna(off_sys) else "データなし"
+
+    if not (pd.isna(on_sys) or pd.isna(off_sys)):
+        diff = off_sys - on_sys
+        if diff >= 10:
+            diff_text = f"⚠️ 未着用時は収縮期が平均 {diff:+.1f} mmHg 高い"
+        elif diff > 0:
+            diff_text = f"未着用時がやや高い傾向 ({diff:+.1f} mmHg)"
+        else:
+            diff_text = f"現時点では差は不明瞭 ({diff:+.1f} mmHg)"
+    else:
+        diff_text = "比較不可（着用/未着用どちらかのデータなし）"
+
+    note = f"記録{total}日分" + ("・記憶ベース含む" if total < 14 else "")
+
+    console = "\n".join([
+        "【CPAP分析】",
+        f"着用率: {usage_text}",
+        f"着用時 朝収縮期平均: {on_sys_text}",
+        f"未着用時 朝収縮期平均: {off_sys_text}",
+        diff_text,
+        f"({note})",
+    ])
+
+    return {
+        "usage": usage_text,
+        "on_sys": on_sys_text,
+        "off_sys": off_sys_text,
+        "diff": diff_text,
+        "note": note,
+        "console": console,
+    }
+
+
+# ---------------------------------------------------------------------------
 # 体重×血圧 相関
 # ---------------------------------------------------------------------------
 
@@ -277,10 +361,13 @@ def write_markdown_report(
     bp_result: dict[str, str],
     bp_time_result: dict[str, str],
     pulse_result: dict[str, str],
+    cpap_result: dict[str, str],
     correlation_result: dict[str, str],
     pattern_result: dict[str, str],
 ) -> None:
     REPORT_DIR.mkdir(exist_ok=True)
+
+    cpap_note = f"（{cpap_result['note']}）" if cpap_result["note"] else ""
     content = f"""### 最新サマリー
 
 | 項目 | 結果 |
@@ -292,6 +379,10 @@ def write_markdown_report(
 | 朝夜差 | {bp_time_result["morning_night_diff"]} |
 | 脈拍状態 | {pulse_result["pulse_status"]} |
 | 脈拍異常記録 | {pulse_result["anomaly_dates"]} |
+| CPAP着用率 | {cpap_result["usage"]} {cpap_note} |
+| CPAP着用時 朝収縮期平均 | {cpap_result["on_sys"]} |
+| CPAP未着用時 朝収縮期平均 | {cpap_result["off_sys"]} |
+| CPAP有無の影響 | {cpap_result["diff"]} |
 | 体重×血圧 相関 | {correlation_result["correlation"]} |
 | 体重増→血圧上昇検出 | {pattern_result["pattern"]} |
 """
@@ -314,6 +405,7 @@ def main() -> None:
     bp_result          = detect_bp_risk(df)
     bp_time_result     = analyze_bp_by_time()
     pulse_result       = detect_pulse_anomaly()
+    cpap_result        = analyze_cpap()
     correlation_result = calc_correlation(df)
     pattern_result     = detect_weight_bp_pattern(df)
 
@@ -321,6 +413,7 @@ def main() -> None:
         bp_result=bp_result,
         bp_time_result=bp_time_result,
         pulse_result=pulse_result,
+        cpap_result=cpap_result,
         correlation_result=correlation_result,
         pattern_result=pattern_result,
     )
@@ -331,6 +424,8 @@ def main() -> None:
     print(bp_time_result["console"])
     print()
     print(pulse_result["console"])
+    print()
+    print(cpap_result["console"])
     print()
     print(correlation_result["console"])
     print()

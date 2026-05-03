@@ -26,9 +26,11 @@ health-project/
 ├── docs/
 │   ├── baseline.md          # 初期測定値・ベースライン
 │   ├── goal.md              # 目標設定
-│   └── rules.md             # 運用ルール（完璧を目指さない）
+│   ├── rules.md             # 運用ルール（完璧を目指さない）
+│   └── daily_template.md   # 日次入力フォーマットの説明
 ├── logs/
 │   ├── daily/
+│   │   ├── input.md         # 日次入力ファイル（ここに記入して「反映して」）
 │   │   ├── weight.csv       # 日次：体重・体脂肪率
 │   │   └── blood_pressure.csv  # 朝夜：血圧・脈拍・メモ
 │   ├── lifestyle/
@@ -65,14 +67,51 @@ YYYY-MM-DD,XX.X,XX.X
 
 ### logs/daily/blood_pressure.csv
 ```
-date,time,systolic,diastolic,pulse,memo
-YYYY-MM-DD,morning/night,XXX,XX,XX,メモ
+date,time,systolic1,diastolic1,pulse1,systolic2,diastolic2,pulse2,memo
+YYYY-MM-DD,morning/night,XXX,XX,XX,XXX,XX,XX,メモ
 ```
 - `time`: `morning`（起床後）または `night`（就寝前）
-- `systolic`: 収縮期血圧（mmHg）
-- `diastolic`: 拡張期血圧（mmHg）
-- `pulse`: 脈拍（bpm）
-- `memo`: 任意メモ（空白OK）
+- `systolic1/2`: 収縮期血圧（mmHg）1回目・2回目
+- `diastolic1/2`: 拡張期血圧（mmHg）1回目・2回目
+- `pulse1/2`: 脈拍（bpm）1回目・2回目
+- `memo`: 任意メモ。朝行には `cpap:on` または `cpap:off` を記入
+- 1回計測の場合は systolic1=systolic2、diastolic1=diastolic2、pulse1=pulse2 に同じ値を入れる
+
+---
+
+## 日次入力ワークフロー
+
+`logs/daily/input.md` に今日のデータを記入して「反映して」と送るだけで全ファイルが更新される。
+
+### 入力フォーマット
+
+```
+【日次記録】YYYY-MM-DD
+体重: XX.Xkg / 体脂肪: XX.X%
+朝血圧: 収縮期/拡張期/脈拍, 収縮期/拡張期/脈拍 / cpap:on
+夜血圧: 収縮期/拡張期/脈拍, 収縮期/拡張期/脈拍
+朝食: 内容
+昼食: 内容
+夕食: 内容
+気づき: 自由記述
+運動: 内容
+```
+
+- 不要な行は削除してOK（測定しなかった血圧・食べていない食事など）
+- 体脂肪・気づきは省略可
+- 血圧は1回計測でも可（`収縮期/拡張期/脈拍` を1つだけ書く）
+- 運動しなかった日も `運動: なし` と記入する
+
+### Claudeの処理手順
+
+ユーザーが「反映して」と言った場合、以下を実行する：
+
+1. `logs/daily/input.md` を読み込み、`【日次記録】` ブロックを解析する
+2. **weight.csv**: 体重・体脂肪を追記（同じ日付が既にある場合は上書き確認）
+3. **blood_pressure.csv**: 朝・夜それぞれ追記。血圧が2回計測なら両列に記入、1回計測なら同じ値を systolic1=systolic2 等に入れる。cpapはmorning行のmemo列へ
+4. **meals.md**: `## YYYY-MM-DD` セクションを末尾に追記
+5. **exercise.md**: 日付と内容を末尾に追記
+6. 更新完了後、コミット確認を行う
 
 ---
 
