@@ -1,0 +1,12 @@
+{
+  "name": "健康記録",
+  "short_name": "健康記録",
+  "description": "日次健康データ入力アプリ",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f2f7",
+  "theme_color": "#007aff",
+  "lang": "ja",
+  "icons": []
+}
