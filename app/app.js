@@ -85,12 +85,17 @@ async function ghPut(path, content, sha, message) {
   }
 }
 
-// ── File formatters ───────────────────────────────────────────────────────────
+// ── File formatters (upsert: 新規→追記 / 差分あり→上書き / 差分なし→null) ──────
 
-function appendWeight(src, date, weight, bodyfat) {
+function upsertWeight(src, date, weight, bodyfat) {
   if (!weight) return null;
-  if (src.split('\n').some(l => l.startsWith(date + ','))) return null;
-  return src.trimEnd() + '\n' + `${date},${weight},${bodyfat || ''}` + '\n';
+  const newRow = `${date},${weight},${bodyfat || ''}`;
+  const lines = src.split('\n');
+  const i = lines.findIndex(l => l.startsWith(date + ','));
+  if (i === -1) return src.trimEnd() + '\n' + newRow + '\n';
+  if (lines[i] === newRow) return null;
+  lines[i] = newRow;
+  return lines.join('\n');
 }
 
 function parseBP(text) {
@@ -100,13 +105,17 @@ function parseBP(text) {
   return p;
 }
 
-function appendBP(src, date, time, bp1text, bp2text, memo) {
+function upsertBP(src, date, time, bp1text, bp2text, memo) {
   const bp1 = parseBP(bp1text);
   if (!bp1) return null;
-  if (src.split('\n').some(l => l.startsWith(`${date},${time},`))) return null;
   const bp2 = parseBP(bp2text) || bp1;
-  const row = [date, time, ...bp1, ...bp2, memo || ''].join(',');
-  return src.trimEnd() + '\n' + row + '\n';
+  const newRow = [date, time, ...bp1, ...bp2, memo || ''].join(',');
+  const lines = src.split('\n');
+  const i = lines.findIndex(l => l.startsWith(`${date},${time},`));
+  if (i === -1) return src.trimEnd() + '\n' + newRow + '\n';
+  if (lines[i] === newRow) return null;
+  lines[i] = newRow;
+  return lines.join('\n');
 }
 
 function toList(text) {
@@ -122,21 +131,48 @@ function toList(text) {
   );
 }
 
-function appendMeals(src, date, { breakfast, lunch, dinner, note }) {
-  if (src.includes(`## ${date}`)) return null;
+function buildMealsSection(date, { breakfast, lunch, dinner, note }) {
   if (!breakfast && !lunch && !dinner && !note) return null;
-  let s = `\n## ${date}\n`;
+  let s = `## ${date}\n`;
   if (breakfast) s += `\n### 朝\n${toList(breakfast)}`;
   if (lunch)     s += `\n### 昼\n${toList(lunch)}`;
   if (dinner)    s += `\n### 夜\n${toList(dinner)}`;
   if (note)      s += `\n### 気づき\n- ${note.trim()}\n`;
-  return src.trimEnd() + '\n' + s;
+  return s;
 }
 
-function appendExercise(src, date, exercise) {
+function buildExerciseSection(date, exercise) {
   if (!exercise || !exercise.trim()) return null;
-  if (src.includes(`## ${date}`)) return null;
-  return src.trimEnd() + '\n\n---\n\n' + `## ${date}\n- ${exercise.trim()}\n`;
+  return `## ${date}\n- ${exercise.trim()}\n`;
+}
+
+// セクション単位でupsert（新規→追記 / 差分あり→置換 / 差分なし→null）
+function upsertMdSection(src, date, newSection) {
+  if (!newSection) return null;
+
+  const marker = `## ${date}`;
+  const useHr  = src.includes('\n---\n');
+  const sep    = useHr ? '\n\n---\n\n' : '\n\n';
+  const si     = src.indexOf(marker);
+
+  if (si === -1) {
+    return src.trimEnd() + sep + newSection.trimEnd() + '\n';
+  }
+
+  const rest    = src.slice(si + marker.length);
+  const nextH2  = rest.search(/\n## /);
+  const oldBody = nextH2 === -1 ? rest : rest.slice(0, nextH2);
+  const after   = nextH2 === -1 ? ''   : rest.slice(nextH2 + 1);
+
+  // 差分比較（セパレータ・空白を正規化）
+  const norm = s => s.replace(/\n---\n/g, '').replace(/\s+/g, ' ').trim();
+  if (norm(marker + oldBody) === norm(newSection)) return null;
+
+  const before = src.slice(0, si);
+  if (!after) {
+    return before.trimEnd() + '\n\n' + newSection.trimEnd() + '\n';
+  }
+  return before.trimEnd() + '\n\n' + newSection.trimEnd() + sep + after.trimStart();
 }
 
 // ── Existing data parsers ─────────────────────────────────────────────────────
@@ -199,31 +235,25 @@ async function loadForDate(date) {
       ghGet('logs/lifestyle/exercise.md'),
     ]);
 
-    // Weight
     const w = parseWeight(wFile.content, date);
     $('weight').value  = w?.weight  || '';
     $('bodyfat').value = w?.bodyfat || '';
 
-    // Morning BP
     const am = parseBPRow(bpFile.content, date, 'morning');
     $('am-bp1').value = am?.bp1 || '';
     $('am-bp2').value = am?.bp2 || '';
-    const cpapVal = am?.cpap || '';
-    document.querySelector(`input[name="cpap"][value="${cpapVal}"]`).checked = true;
+    document.querySelector(`input[name="cpap"][value="${am?.cpap || ''}"]`).checked = true;
 
-    // Night BP
     const pm = parseBPRow(bpFile.content, date, 'night');
     $('pm-bp1').value = pm?.bp1 || '';
     $('pm-bp2').value = pm?.bp2 || '';
 
-    // Meals
     const mealsSection = parseDateSection(mealsFile.content, date);
-    $('breakfast').value = mealsSection ? extractSubsection(mealsSection, '朝')    : '';
-    $('lunch').value     = mealsSection ? extractSubsection(mealsSection, '昼')    : '';
-    $('dinner').value    = mealsSection ? extractSubsection(mealsSection, '夜')    : '';
+    $('breakfast').value = mealsSection ? extractSubsection(mealsSection, '朝')     : '';
+    $('lunch').value     = mealsSection ? extractSubsection(mealsSection, '昼')     : '';
+    $('dinner').value    = mealsSection ? extractSubsection(mealsSection, '夜')     : '';
     $('food-note').value = mealsSection ? extractSubsection(mealsSection, '気づき') : '';
 
-    // Exercise
     const exSection = parseDateSection(exFile.content, date);
     $('exercise').value = exSection
       ? exSection.split('\n').filter(l => l.trim().startsWith('- '))
@@ -251,74 +281,67 @@ async function submit() {
   setLoading(true);
   showMsg('送信中...', 'info');
 
-  const done = [], skipped = [], errors = [];
+  const updated = [], unchanged = [], errors = [];
 
-  // Generic file updater
   async function run(label, filePath, patcher) {
     try {
       const { content, sha } = await ghGet(filePath);
       const next = patcher(content);
-      if (next === null) { skipped.push(label); return; }
-      await ghPut(filePath, next, sha, `Add ${label} for ${date}`);
-      done.push(label);
+      if (next === null) { unchanged.push(label); return; }
+      await ghPut(filePath, next, sha, `Update ${label} for ${date}`);
+      updated.push(label);
     } catch (e) {
       errors.push(`${label}: ${e.message}`);
     }
   }
 
-  // Weight
+  // 体重
   await run('体重', 'logs/daily/weight.csv', c =>
-    appendWeight(c, date, $('weight').value, $('bodyfat').value));
+    upsertWeight(c, date, $('weight').value, $('bodyfat').value));
 
-  // Blood pressure (read once → apply both → write once, to avoid SHA conflict)
-  const amBp1 = $('am-bp1').value;
-  const amBp2 = $('am-bp2').value;
-  const pmBp1 = $('pm-bp1').value;
-  const pmBp2 = $('pm-bp2').value;
+  // 血圧（1ファイルへの書き込みを1回にまとめてSHA競合を防ぐ）
+  const amBp1 = $('am-bp1').value, amBp2 = $('am-bp2').value;
+  const pmBp1 = $('pm-bp1').value, pmBp2 = $('pm-bp2').value;
   const cpap  = document.querySelector('input[name="cpap"]:checked')?.value || '';
-  const hasMorning = !!parseBP(amBp1);
-  const hasNight   = !!parseBP(pmBp1);
+  const hasMorning = !!parseBP(amBp1), hasNight = !!parseBP(pmBp1);
 
   if (hasMorning || hasNight) {
     try {
       const { content, sha } = await ghGet('logs/daily/blood_pressure.csv');
       let cur = content;
-      const bpDone = [], bpSkip = [];
+      const bpUpdated = [], bpUnchanged = [];
 
       if (hasMorning) {
-        const next = appendBP(cur, date, 'morning', amBp1, amBp2, cpap ? `cpap:${cpap}` : '');
-        if (next) { cur = next; bpDone.push('朝'); }
-        else bpSkip.push('朝');
+        const next = upsertBP(cur, date, 'morning', amBp1, amBp2, cpap ? `cpap:${cpap}` : '');
+        if (next) { cur = next; bpUpdated.push('朝'); } else bpUnchanged.push('朝');
       }
       if (hasNight) {
-        const next = appendBP(cur, date, 'night', pmBp1, pmBp2, '');
-        if (next) { cur = next; bpDone.push('夜'); }
-        else bpSkip.push('夜');
+        const next = upsertBP(cur, date, 'night', pmBp1, pmBp2, '');
+        if (next) { cur = next; bpUpdated.push('夜'); } else bpUnchanged.push('夜');
       }
 
       if (cur !== content) {
-        await ghPut('logs/daily/blood_pressure.csv', cur, sha, `Add BP for ${date}`);
-        done.push(`血圧(${bpDone.join('・')})`);
-      } else {
-        skipped.push(`血圧(${bpSkip.join('・')})`);
+        await ghPut('logs/daily/blood_pressure.csv', cur, sha, `Update BP for ${date}`);
+        updated.push(`血圧(${bpUpdated.join('・')})`);
       }
+      if (bpUnchanged.length) unchanged.push(`血圧(${bpUnchanged.join('・')})`);
     } catch (e) {
       errors.push(`血圧: ${e.message}`);
     }
   }
 
-  // Meals
+  // 食事
   await run('食事', 'logs/lifestyle/meals.md', c =>
-    appendMeals(c, date, {
+    upsertMdSection(c, date, buildMealsSection(date, {
       breakfast: $('breakfast').value,
       lunch:     $('lunch').value,
       dinner:    $('dinner').value,
       note:      $('food-note').value,
-    }));
+    })));
 
-  // Exercise
+  // 運動
   await run('運動', 'logs/lifestyle/exercise.md', c =>
-    appendExercise(c, date, $('exercise').value));
+    upsertMdSection(c, date, buildExerciseSection(date, $('exercise').value)));
 
   setLoading(false);
 
@@ -326,8 +349,8 @@ async function submit() {
     showMsg('❌ エラー:\n' + errors.join('\n'), 'error');
   } else {
     const parts = [];
-    if (done.length)    parts.push('✅ 記録: '           + done.join('・'));
-    if (skipped.length) parts.push('⏭ スキップ（既存）: ' + skipped.join('・'));
+    if (updated.length)   parts.push('✅ 更新: '   + updated.join('・'));
+    if (unchanged.length) parts.push('— 変更なし: ' + unchanged.join('・'));
     showMsg(parts.join('\n') || '変更なし', 'success');
     clearForm();
   }
