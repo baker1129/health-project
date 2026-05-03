@@ -13,18 +13,20 @@ OUTPUT = REPORT_DIR / "blood_pressure.png"
 
 def load_data() -> pd.DataFrame:
     df = pd.read_csv(BP_CSV)
-
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df["systolic"] = pd.to_numeric(df["systolic"], errors="coerce")
-    df["diastolic"] = pd.to_numeric(df["diastolic"], errors="coerce")
 
-    if "pulse" in df.columns:
-        df["pulse"] = pd.to_numeric(df["pulse"], errors="coerce")
+    if "systolic1" in df.columns:
+        for col in ["systolic1", "diastolic1", "pulse1", "systolic2", "diastolic2", "pulse2"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        df["systolic"]  = (df["systolic1"]  + df["systolic2"])  / 2
+        df["diastolic"] = (df["diastolic1"] + df["diastolic2"]) / 2
+        df["pulse"]     = (df["pulse1"]     + df["pulse2"])     / 2
+    else:
+        for col in ["systolic", "diastolic", "pulse"]:
+            df[col] = pd.to_numeric(df.get(col, pd.NA), errors="coerce")
 
     df = df.dropna(subset=["date", "systolic", "diastolic"])
-    df = df.sort_values("date")
-
-    return df
+    return df.sort_values("date")
 
 
 def daily_average(df: pd.DataFrame) -> pd.DataFrame:
