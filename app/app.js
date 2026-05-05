@@ -15,6 +15,10 @@ function saveSettings() {
   localStorage.setItem('gh_branch', $('s-branch').value.trim() || DEFAULTS.branch);
 }
 
+// ── Draft store ───────────────────────────────────────────────────────────────
+const drafts = {};
+let currentDate = '';
+
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
@@ -52,6 +56,45 @@ function fromB64(str) {
   const bin = atob(str.replace(/\n/g, ''));
   const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+// ── Draft helpers ─────────────────────────────────────────────────────────────
+
+function saveDraft(date) {
+  if (!date) return;
+  drafts[date] = {
+    weight:     $('weight').value,
+    bodyfat:    $('bodyfat').value,
+    amBp1:      $('am-bp1').value,
+    amBp2:      $('am-bp2').value,
+    cpap:       document.querySelector('input[name="cpap"]:checked')?.value || '',
+    pmBp1:      $('pm-bp1').value,
+    pmBp2:      $('pm-bp2').value,
+    eatingOut:  $('eating-out').value,
+    snackCount: $('snack-count').value,
+    breakfast:  $('breakfast').value,
+    lunch:      $('lunch').value,
+    dinner:     $('dinner').value,
+    foodNote:   $('food-note').value,
+    exercise:   $('exercise').value,
+  };
+}
+
+function applyDraft(draft) {
+  $('weight').value      = draft.weight;
+  $('bodyfat').value     = draft.bodyfat;
+  $('am-bp1').value      = draft.amBp1;
+  $('am-bp2').value      = draft.amBp2;
+  document.querySelector(`input[name="cpap"][value="${draft.cpap}"]`).checked = true;
+  $('pm-bp1').value      = draft.pmBp1;
+  $('pm-bp2').value      = draft.pmBp2;
+  $('eating-out').value  = draft.eatingOut;
+  $('snack-count').value = draft.snackCount;
+  $('breakfast').value   = draft.breakfast;
+  $('lunch').value       = draft.lunch;
+  $('dinner').value      = draft.dinner;
+  $('food-note').value   = draft.foodNote;
+  $('exercise').value    = draft.exercise;
 }
 
 // ── GitHub API ────────────────────────────────────────────────────────────────
@@ -234,6 +277,12 @@ function setLoadIndicator(on) {
 
 async function loadForDate(date) {
   if (!cfg.token || !date) return;
+
+  if (drafts[date]) {
+    applyDraft(drafts[date]);
+    return;
+  }
+
   setLoadIndicator(true);
 
   try {
@@ -286,75 +335,107 @@ async function submit() {
     return;
   }
 
-  const date = $('date').value;
-  if (!date) { showMsg('日付を入力してください', 'error'); return; }
+  // 現在の入力をドラフトに保存してから全日付を送信
+  saveDraft(currentDate);
+
+  const datesToSubmit = Object.keys(drafts).sort();
+  if (datesToSubmit.length === 0) {
+    showMsg('入力がありません', 'error');
+    return;
+  }
 
   setLoading(true);
   showMsg('送信中...', 'info');
 
   const updated = [], unchanged = [], errors = [];
+  const dateLabel = datesToSubmit.length > 1
+    ? `${datesToSubmit[0]} 他${datesToSubmit.length - 1}日`
+    : datesToSubmit[0];
 
-  async function run(label, filePath, patcher) {
-    try {
-      const { content, sha } = await ghGet(filePath);
-      const next = patcher(content);
-      if (next === null) { unchanged.push(label); return; }
-      await ghPut(filePath, next, sha, `Update ${label} for ${date}`);
-      updated.push(label);
-    } catch (e) {
-      errors.push(`${label}: ${e.message}`);
+  // 体重（全日付を1ファイルにまとめて書き込み）
+  try {
+    const { content, sha } = await ghGet('logs/daily/weight.csv');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      const next = upsertWeight(cur, date, d.weight, d.bodyfat);
+      if (next) { cur = next; changed = true; }
     }
+    if (changed) {
+      await ghPut('logs/daily/weight.csv', cur, sha, `Update 体重 for ${dateLabel}`);
+      updated.push('体重');
+    } else {
+      unchanged.push('体重');
+    }
+  } catch (e) {
+    errors.push(`体重: ${e.message}`);
   }
 
-  // 体重
-  await run('体重', 'logs/daily/weight.csv', c =>
-    upsertWeight(c, date, $('weight').value, $('bodyfat').value));
-
-  // 血圧（1ファイルへの書き込みを1回にまとめてSHA競合を防ぐ）
-  const amBp1 = $('am-bp1').value, amBp2 = $('am-bp2').value;
-  const pmBp1 = $('pm-bp1').value, pmBp2 = $('pm-bp2').value;
-  const cpap  = document.querySelector('input[name="cpap"]:checked')?.value || '';
-  const hasMorning = !!parseBP(amBp1), hasNight = !!parseBP(pmBp1);
-
-  if (hasMorning || hasNight) {
-    try {
-      const { content, sha } = await ghGet('logs/daily/blood_pressure.csv');
-      let cur = content;
-      const bpUpdated = [], bpUnchanged = [];
-
-      if (hasMorning) {
-        const next = upsertBP(cur, date, 'morning', amBp1, amBp2, cpap ? `cpap:${cpap}` : '');
-        if (next) { cur = next; bpUpdated.push('朝'); } else bpUnchanged.push('朝');
+  // 血圧（全日付を1ファイルにまとめて書き込み）
+  try {
+    const { content, sha } = await ghGet('logs/daily/blood_pressure.csv');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      if (parseBP(d.amBp1)) {
+        const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
+        if (next) { cur = next; changed = true; }
       }
-      if (hasNight) {
-        const next = upsertBP(cur, date, 'night', pmBp1, pmBp2, '');
-        if (next) { cur = next; bpUpdated.push('夜'); } else bpUnchanged.push('夜');
+      if (parseBP(d.pmBp1)) {
+        const next = upsertBP(cur, date, 'night', d.pmBp1, d.pmBp2, '');
+        if (next) { cur = next; changed = true; }
       }
-
-      if (cur !== content) {
-        await ghPut('logs/daily/blood_pressure.csv', cur, sha, `Update BP for ${date}`);
-        updated.push(`血圧(${bpUpdated.join('・')})`);
-      }
-      if (bpUnchanged.length) unchanged.push(`血圧(${bpUnchanged.join('・')})`);
-    } catch (e) {
-      errors.push(`血圧: ${e.message}`);
     }
+    if (changed) {
+      await ghPut('logs/daily/blood_pressure.csv', cur, sha, `Update BP for ${dateLabel}`);
+      updated.push('血圧');
+    } else {
+      unchanged.push('血圧');
+    }
+  } catch (e) {
+    errors.push(`血圧: ${e.message}`);
   }
 
-  // 食事
-  await run('食事', 'logs/lifestyle/meals.md', c =>
-    upsertMdSection(c, date, buildMealsSection(date, {
-      breakfast:  $('breakfast').value,
-      lunch:      $('lunch').value,
-      dinner:     $('dinner').value,
-      note:       $('food-note').value,
-      eatingOut:  $('eating-out').value,
-      snackCount: $('snack-count').value,
-    })));
+  // 食事（全日付を1ファイルにまとめて書き込み）
+  try {
+    const { content, sha } = await ghGet('logs/lifestyle/meals.md');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      const next = upsertMdSection(cur, date, buildMealsSection(date, {
+        breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
+        note: d.foodNote, eatingOut: d.eatingOut, snackCount: d.snackCount,
+      }));
+      if (next) { cur = next; changed = true; }
+    }
+    if (changed) {
+      await ghPut('logs/lifestyle/meals.md', cur, sha, `Update 食事 for ${dateLabel}`);
+      updated.push('食事');
+    } else {
+      unchanged.push('食事');
+    }
+  } catch (e) {
+    errors.push(`食事: ${e.message}`);
+  }
 
-  // 運動
-  await run('運動', 'logs/lifestyle/exercise.md', c =>
-    upsertMdSection(c, date, buildExerciseSection(date, $('exercise').value)));
+  // 運動（全日付を1ファイルにまとめて書き込み）
+  try {
+    const { content, sha } = await ghGet('logs/lifestyle/exercise.md');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      const next = upsertMdSection(cur, date, buildExerciseSection(date, d.exercise));
+      if (next) { cur = next; changed = true; }
+    }
+    if (changed) {
+      await ghPut('logs/lifestyle/exercise.md', cur, sha, `Update 運動 for ${dateLabel}`);
+      updated.push('運動');
+    } else {
+      unchanged.push('運動');
+    }
+  } catch (e) {
+    errors.push(`運動: ${e.message}`);
+  }
 
   setLoading(false);
 
@@ -362,7 +443,7 @@ async function submit() {
     showMsg('❌ エラー:\n' + errors.join('\n'), 'error');
   } else {
     const parts = [];
-    if (updated.length)   parts.push('✅ 更新: '   + updated.join('・'));
+    if (updated.length)   parts.push(`✅ 更新(${dateLabel}): ` + updated.join('・'));
     if (unchanged.length) parts.push('— 変更なし: ' + unchanged.join('・'));
     showMsg(parts.join('\n') || '変更なし', 'success');
     clearForm();
@@ -370,12 +451,14 @@ async function submit() {
 }
 
 function clearForm() {
+  Object.keys(drafts).forEach(k => delete drafts[k]);
   ['am-bp1','am-bp2','pm-bp1','pm-bp2','weight','bodyfat',
    'eating-out','snack-count','breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
     $(id).value = '';
   });
   document.querySelector('input[name="cpap"][value=""]').checked = true;
-  $('date').value = todayLocal();
+  currentDate = todayLocal();
+  $('date').value = currentDate;
 }
 
 // ── Settings modal ────────────────────────────────────────────────────────────
@@ -393,7 +476,8 @@ function closeSettings() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  $('date').value = todayLocal();
+  currentDate = todayLocal();
+  $('date').value = currentDate;
 
   $('submit-btn').addEventListener('click', submit);
   $('settings-btn').addEventListener('click', openSettings);
@@ -410,8 +494,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!cfg.token) {
     openSettings();
   } else {
-    loadForDate($('date').value);
+    loadForDate(currentDate);
   }
 
-  $('date').addEventListener('change', e => loadForDate(e.target.value));
+  $('date').addEventListener('change', e => {
+    saveDraft(currentDate);
+    currentDate = e.target.value;
+    loadForDate(currentDate);
+  });
 });
