@@ -10,7 +10,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 ROOT = Path(__file__).resolve().parents[1]
 
 WEIGHT_CSV = ROOT / "logs" / "daily" / "weight.csv"
-BP_CSV = ROOT / "logs" / "daily" / "blood_pressure.csv"
+BP_CSV     = ROOT / "logs" / "daily" / "blood_pressure.csv"
+MEALS_MD   = ROOT / "logs" / "lifestyle" / "meals.md"
 
 REPORT_DIR = ROOT / "reports"
 ANALYSIS_MD = REPORT_DIR / "health_analysis.md"
@@ -354,6 +355,51 @@ def detect_weight_bp_pattern(df: pd.DataFrame) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# 食事（外食・夜食間食）週次集計
+# ---------------------------------------------------------------------------
+
+def analyze_meals() -> dict[str, str]:
+    import re
+    from datetime import datetime, timedelta
+
+    if not MEALS_MD.exists():
+        return {"weekly_summary": "データなし", "console": "食事分析: データなし"}
+
+    text = MEALS_MD.read_text(encoding="utf-8")
+    sections = re.split(r'\n(?=## \d{4}-\d{2}-\d{2})', text)
+
+    records = []
+    for section in sections:
+        date_m = re.match(r'## (\d{4}-\d{2}-\d{2})', section)
+        if not date_m:
+            continue
+        date = datetime.strptime(date_m.group(1), "%Y-%m-%d").date()
+        eo_m  = re.search(r'^外食: (\d+)回',      section, re.MULTILINE)
+        sn_m  = re.search(r'^夜食・間食: (\d+)回', section, re.MULTILINE)
+        records.append({
+            "date":       date,
+            "eating_out": int(eo_m.group(1))  if eo_m  else None,
+            "snack":      int(sn_m.group(1))  if sn_m  else None,
+        })
+
+    if not records:
+        return {"weekly_summary": "記録なし", "console": "食事分析: 記録なし"}
+
+    latest_date = max(r["date"] for r in records)
+    week_start  = latest_date - __import__("datetime").timedelta(days=6)
+    week = [r for r in records if r["date"] >= week_start]
+
+    eo_total  = sum(r["eating_out"] for r in week if r["eating_out"] is not None)
+    sn_total  = sum(r["snack"]      for r in week if r["snack"]      is not None)
+    eo_days   = sum(1 for r in week if r["eating_out"] is not None)
+    sn_days   = sum(1 for r in week if r["snack"]      is not None)
+
+    summary_md = f"外食 {eo_total}回 / 夜食・間食 {sn_total}回（直近7日・記録{max(eo_days, sn_days)}日分）"
+    console    = f"外食: {eo_total}回、夜食・間食: {sn_total}回（直近7日・記録{max(eo_days, sn_days)}日分）"
+    return {"weekly_summary": summary_md, "console": console}
+
+
+# ---------------------------------------------------------------------------
 # Markdownレポート書き出し
 # ---------------------------------------------------------------------------
 
@@ -364,6 +410,7 @@ def write_markdown_report(
     cpap_result: dict[str, str],
     correlation_result: dict[str, str],
     pattern_result: dict[str, str],
+    meals_result: dict[str, str],
 ) -> None:
     REPORT_DIR.mkdir(exist_ok=True)
 
@@ -385,6 +432,7 @@ def write_markdown_report(
 | CPAP有無の影響 | {cpap_result["diff"]} |
 | 体重×血圧 相関 | {correlation_result["correlation"]} |
 | 体重増→血圧上昇検出 | {pattern_result["pattern"]} |
+| 外食・夜食間食（直近7日） | {meals_result["weekly_summary"]} |
 """
     ANALYSIS_MD.write_text(content, encoding="utf-8")
 
@@ -408,6 +456,7 @@ def main() -> None:
     cpap_result        = analyze_cpap()
     correlation_result = calc_correlation(df)
     pattern_result     = detect_weight_bp_pattern(df)
+    meals_result       = analyze_meals()
 
     write_markdown_report(
         bp_result=bp_result,
@@ -416,6 +465,7 @@ def main() -> None:
         cpap_result=cpap_result,
         correlation_result=correlation_result,
         pattern_result=pattern_result,
+        meals_result=meals_result,
     )
 
     print("=== Health Analysis ===\n")
@@ -430,6 +480,8 @@ def main() -> None:
     print(correlation_result["console"])
     print()
     print(pattern_result["console"])
+    print()
+    print(meals_result["console"])
     print()
     print(f"Markdown report saved: {ANALYSIS_MD}")
 

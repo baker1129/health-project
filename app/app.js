@@ -131,9 +131,13 @@ function toList(text) {
   );
 }
 
-function buildMealsSection(date, { breakfast, lunch, dinner, note }) {
-  if (!breakfast && !lunch && !dinner && !note) return null;
+function buildMealsSection(date, { breakfast, lunch, dinner, note, eatingOut, snackCount }) {
+  const hasEatingOut  = eatingOut  !== '' && eatingOut  != null;
+  const hasSnackCount = snackCount !== '' && snackCount != null;
+  if (!breakfast && !lunch && !dinner && !note && !hasEatingOut && !hasSnackCount) return null;
   let s = `## ${date}\n`;
+  if (hasEatingOut)  s += `外食: ${eatingOut}回\n`;
+  if (hasSnackCount) s += `夜食・間食: ${snackCount}回\n`;
   if (breakfast) s += `\n### 朝\n${toList(breakfast)}`;
   if (lunch)     s += `\n### 昼\n${toList(lunch)}`;
   if (dinner)    s += `\n### 夜\n${toList(dinner)}`;
@@ -203,6 +207,11 @@ function parseDateSection(src, date) {
   return end === -1 ? after : after.slice(0, end);
 }
 
+function extractCount(section, key) {
+  const m = section.match(new RegExp(key + ': (\\d+)回'));
+  return m ? m[1] : '';
+}
+
 function extractSubsection(section, heading) {
   const idx = section.indexOf(`### ${heading}`);
   if (idx === -1) return '';
@@ -249,10 +258,12 @@ async function loadForDate(date) {
     $('pm-bp2').value = pm?.bp2 || '';
 
     const mealsSection = parseDateSection(mealsFile.content, date);
-    $('breakfast').value = mealsSection ? extractSubsection(mealsSection, '朝')     : '';
-    $('lunch').value     = mealsSection ? extractSubsection(mealsSection, '昼')     : '';
-    $('dinner').value    = mealsSection ? extractSubsection(mealsSection, '夜')     : '';
-    $('food-note').value = mealsSection ? extractSubsection(mealsSection, '気づき') : '';
+    $('eating-out').value  = mealsSection ? extractCount(mealsSection, '外食')       : '';
+    $('snack-count').value = mealsSection ? extractCount(mealsSection, '夜食・間食') : '';
+    $('breakfast').value   = mealsSection ? extractSubsection(mealsSection, '朝')    : '';
+    $('lunch').value       = mealsSection ? extractSubsection(mealsSection, '昼')    : '';
+    $('dinner').value      = mealsSection ? extractSubsection(mealsSection, '夜')    : '';
+    $('food-note').value   = mealsSection ? extractSubsection(mealsSection, '気づき'): '';
 
     const exSection = parseDateSection(exFile.content, date);
     $('exercise').value = exSection
@@ -333,10 +344,12 @@ async function submit() {
   // 食事
   await run('食事', 'logs/lifestyle/meals.md', c =>
     upsertMdSection(c, date, buildMealsSection(date, {
-      breakfast: $('breakfast').value,
-      lunch:     $('lunch').value,
-      dinner:    $('dinner').value,
-      note:      $('food-note').value,
+      breakfast:  $('breakfast').value,
+      lunch:      $('lunch').value,
+      dinner:     $('dinner').value,
+      note:       $('food-note').value,
+      eatingOut:  $('eating-out').value,
+      snackCount: $('snack-count').value,
     })));
 
   // 運動
@@ -358,7 +371,7 @@ async function submit() {
 
 function clearForm() {
   ['am-bp1','am-bp2','pm-bp1','pm-bp2','weight','bodyfat',
-   'breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
+   'eating-out','snack-count','breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
     $(id).value = '';
   });
   document.querySelector('input[name="cpap"][value=""]').checked = true;
