@@ -76,8 +76,9 @@ def get_week_info() -> tuple[int, date, date, bool]:
             latest_end   = date.fromisoformat(dm.group(2))
 
     if latest_end is None:
-        # アーカイブなし → 初回生成
-        return 1, today - timedelta(days=6), today, False
+        # アーカイブなし → 初回生成（プロジェクト開始日から）
+        project_start = date(2026, 4, 29)
+        return 1, project_start, today, False
 
     if latest_end == today:
         # 同週の上書き更新（当日データが追加されたケース）
