@@ -1,0 +1,48 @@
+name: Weekly Review Generator
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'logs/daily/blood_pressure.csv'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '水曜日・夜血圧チェックをスキップして強制実行'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  weekly-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install pandas
+
+      - name: Generate weekly review
+        env:
+          TZ: Asia/Tokyo
+        run: |
+          if [ "${{ inputs.force }}" = "true" ]; then
+            python scripts/generate_weekly_review.py --force
+          else
+            python scripts/generate_weekly_review.py
+          fi
+
+      - name: Commit weekly review
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add logs/reviews/
+          git diff --cached --quiet || (git commit -m "Add weekly review [skip ci]" && git push)
