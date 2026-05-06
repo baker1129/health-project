@@ -51,29 +51,40 @@ def should_run() -> bool:
 # 週番号・日付範囲の決定
 # ---------------------------------------------------------------------------
 
-def get_week_info() -> tuple[int, date, date]:
-    """(week_num, start, end) を返す。アーカイブの内容から次の週番号を決定する。"""
+def get_week_info() -> tuple[int, date, date, bool]:
+    """(week_num, start, end, is_update) を返す。
+    is_update=True のとき既存アーカイブの上書き更新（テンプレートは差し替えない）。
+    """
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    today = datetime.now(JST).date()
 
     existing = sorted(ARCHIVE_DIR.glob("weekly_review_week*.md"))
-    nums = []
-    last_end: date | None = None
+    latest_num   = 0
+    latest_start: date | None = None
+    latest_end:   date | None = None
 
     for f in existing:
         m = re.match(r"weekly_review_week(\d+)\.md", f.name)
         if not m:
             continue
         n = int(m.group(1))
-        nums.append(n)
         content = f.read_text(encoding="utf-8")
         dm = re.search(r"## (\d{4}-\d{2}-\d{2}) → (\d{4}-\d{2}-\d{2})", content)
-        if dm and (last_end is None or int(dm.group(2).replace("-", "")) > int(last_end.isoformat().replace("-", ""))):
-            last_end = date.fromisoformat(dm.group(2))
+        if dm and n > latest_num:
+            latest_num   = n
+            latest_start = date.fromisoformat(dm.group(1))
+            latest_end   = date.fromisoformat(dm.group(2))
 
-    week_num = (max(nums) + 1) if nums else 1
-    end = datetime.now(JST).date()
-    start = (last_end + timedelta(days=1)) if last_end else (end - timedelta(days=6))
-    return week_num, start, end
+    if latest_end is None:
+        # アーカイブなし → 初回生成
+        return 1, today - timedelta(days=6), today, False
+
+    if latest_end == today:
+        # 同週の上書き更新（当日データが追加されたケース）
+        return latest_num, latest_start, today, True
+
+    # 新しい週の生成
+    return latest_num + 1, latest_end + timedelta(days=1), today, False
 
 
 # ---------------------------------------------------------------------------
@@ -437,27 +448,31 @@ def main() -> None:
     if not should_run():
         sys.exit(0)
 
-    week_num, start, end = get_week_info()
+    week_num, start, end, is_update = get_week_info()
 
     if start > end:
-        print(f"今週分（〜{end}）は既にアーカイブ済みです（直近アーカイブの終了日: {start - timedelta(days=1)}）。スキップします。")
+        print(f"スキップ: start({start}) > end({end})。データ範囲が不正です。")
         sys.exit(0)
 
-    print(f"Week {week_num} のレビューを生成中: {start} → {end}")
+    action = "更新" if is_update else "新規生成"
+    print(f"Week {week_num} のレビューを{action}中: {start} → {end}")
 
     # レビュー生成・アーカイブ保存
     review = build_review(week_num, start, end)
     archive_path = ARCHIVE_DIR / f"weekly_review_week{week_num}.md"
     archive_path.write_text(review, encoding="utf-8")
-    print(f"アーカイブ保存: {archive_path}")
+    print(f"アーカイブ保存（{action}）: {archive_path}")
 
-    # 次週テンプレート生成
-    next_week_num  = week_num + 1
-    next_start     = end + timedelta(days=1)
-    next_end       = end + timedelta(days=7)
-    template       = build_next_template(next_week_num, next_start, next_end)
-    CURRENT_FILE.write_text(template, encoding="utf-8")
-    print(f"次週テンプレート作成: {CURRENT_FILE}（Week {next_week_num}: {next_start} → {next_end}）")
+    # 新しい週の場合のみ次週テンプレートを差し替え
+    if not is_update:
+        next_week_num = week_num + 1
+        next_start    = end + timedelta(days=1)
+        next_end      = end + timedelta(days=7)
+        template      = build_next_template(next_week_num, next_start, next_end)
+        CURRENT_FILE.write_text(template, encoding="utf-8")
+        print(f"次週テンプレート作成: {CURRENT_FILE}（Week {next_week_num}: {next_start} → {next_end}）")
+    else:
+        print(f"上書き更新のため weekly_review.md テンプレートは変更しません。")
 
 
 if __name__ == "__main__":
