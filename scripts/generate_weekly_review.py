@@ -438,6 +438,11 @@ def main() -> None:
         sys.exit(0)
 
     week_num, start, end = get_week_info()
+
+    if start > end:
+        print(f"今週分（〜{end}）は既にアーカイブ済みです（直近アーカイブの終了日: {start - timedelta(days=1)}）。スキップします。")
+        sys.exit(0)
+
     print(f"Week {week_num} のレビューを生成中: {start} → {end}")
 
     # レビュー生成・アーカイブ保存
