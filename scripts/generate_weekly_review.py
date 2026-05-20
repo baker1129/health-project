@@ -35,14 +35,17 @@ def should_run() -> bool:
     if FORCE:
         return True
     now = datetime.now(JST)
-    if now.weekday() != 2:  # 2 = Wednesday
-        print(f"本日は水曜日ではありません（{now.strftime('%A')}）。スキップします。")
-        return False
-    today_str = now.date().isoformat()
+    today = now.date()
+
+    # 直近の水曜日（深夜越え対応：今日が水曜なら今日、それ以外は遡る）
+    days_since_wed = (today.weekday() - 2) % 7
+    last_wednesday = today - timedelta(days=days_since_wed)
+
+    wed_str = last_wednesday.isoformat()
     df = pd.read_csv(BP_CSV)
-    has_night = not df[(df["date"] == today_str) & (df["time"] == "night")].empty
+    has_night = not df[(df["date"] == wed_str) & (df["time"] == "night")].empty
     if not has_night:
-        print(f"本日（{today_str}）の夜血圧がまだ入力されていません。スキップします。")
+        print(f"直近の水曜日（{wed_str}）の夜血圧がまだ入力されていません。スキップします。")
         return False
     return True
 
@@ -221,11 +224,16 @@ def build_bp_section(bp_morning: pd.DataFrame, bp_night: pd.DataFrame) -> str:
             else:
                 lines.append(f"- CPAP未着用日（{off_dates}）: 朝収縮期 {off_sys:.1f} mmHg")
 
-    # 脈拍異常
+    # 脈拍異常（複数日継続なら⚠️、単発は記録のみ）
     all_bp = pd.concat([bp_morning, bp_night])
     anomalies = all_bp[all_bp["pulse"] > 100]
-    for _, row in anomalies.iterrows():
-        lines.append(f"- ⚠️ 脈拍異常: {row['date']} {row['time']} / {row['pulse']:.0f} bpm（頻脈）")
+    anomaly_days = anomalies["date"].nunique() if not anomalies.empty else 0
+    if anomaly_days >= 2:
+        for _, row in anomalies.iterrows():
+            lines.append(f"- ⚠️ 脈拍異常: {row['date']} {row['time']} / {row['pulse']:.0f} bpm（頻脈）")
+    elif anomaly_days == 1:
+        row = anomalies.iloc[0]
+        lines.append(f"- 脈拍メモ: {row['date']} {row['time']} / {row['pulse']:.0f} bpm（単発・経過観察）")
 
     return "\n".join(lines)
 
@@ -288,11 +296,12 @@ def build_analysis(
             diff_cpap = off_df["systolic"].mean() - on_df["systolic"].mean()
             lines.append(f"CPAP未着用時の朝収縮期は着用時より平均 {diff_cpap:+.1f} mmHg 高い。着用継続が最優先。")
 
-    # 脈拍異常
+    # 脈拍異常（複数日継続時のみ分析コメントを追加）
     all_bp = pd.concat([bp_morning, bp_night]) if not (bp_morning.empty and bp_night.empty) else pd.DataFrame()
     if not all_bp.empty:
         anomalies = all_bp[all_bp["pulse"] > 100]
-        if not anomalies.empty:
+        anomaly_days = anomalies["date"].nunique() if not anomalies.empty else 0
+        if anomaly_days >= 2:
             for _, row in anomalies.iterrows():
                 lines.append(f"{row['date']} {row['time']} の脈拍 {row['pulse']:.0f} bpm は頻脈。飲酒・ストレス等との関連を確認。")
 
