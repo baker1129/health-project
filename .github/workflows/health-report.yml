@@ -37,4 +37,5 @@ jobs:
 
           git add README.md reports/health_analysis.md reports/blood_pressure.png reports/weight.png
           git commit -m "Update health report [skip ci]" || echo "No changes to commit"
+          git pull --rebase origin main
           git push
