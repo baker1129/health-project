@@ -178,8 +178,15 @@ def detect_pulse_anomaly() -> dict[str, str]:
         return {"pulse_status": "データなし", "anomaly_dates": "なし", "console": "脈拍チェック: データなし"}
 
     df_p = df.dropna(subset=["pulse"])
-    tachycardia = df_p[df_p["pulse"] > 100]
-    bradycardia = df_p[df_p["pulse"] < 50]
+
+    latest_pulse = df_p.iloc[-1]["pulse"]
+
+    # 異常記録表示: 14日以内かつ当月のみ（どちらか一方でも外れたら非表示）
+    today = pd.Timestamp.now()
+    cutoff = today - pd.Timedelta(days=14)
+    df_window = df_p[(df_p["date"] >= cutoff) & (df_p["date"].dt.month == today.month)]
+    tachycardia = df_window[df_window["pulse"] > 100]
+    bradycardia = df_window[df_window["pulse"] < 50]
 
     anomaly_lines = []
     for _, row in pd.concat([tachycardia, bradycardia]).sort_values("date").iterrows():
@@ -187,8 +194,6 @@ def detect_pulse_anomaly() -> dict[str, str]:
         anomaly_lines.append(
             f"{row['date'].strftime('%Y-%m-%d')} {row['time']} / {row['pulse']:.1f} bpm / {kind}"
         )
-
-    latest_pulse = df_p.iloc[-1]["pulse"]
     if latest_pulse > 100:
         pulse_status = f"⚠️ 直近の脈拍 {latest_pulse:.1f} bpm: 頻脈の可能性。主治医に相談を"
     elif latest_pulse < 50:
