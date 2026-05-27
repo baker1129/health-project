@@ -16,6 +16,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: main-push
+  cancel-in-progress: false
+
 jobs:
   weekly-review:
     runs-on: ubuntu-latest

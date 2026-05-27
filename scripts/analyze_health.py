@@ -1,7 +1,10 @@
 import sys
+from datetime import timezone, timedelta, datetime as dt
 from pathlib import Path
 
 import pandas as pd
+
+JST = timezone(timedelta(hours=9))
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -182,9 +185,9 @@ def detect_pulse_anomaly() -> dict[str, str]:
     latest_pulse = df_p.iloc[-1]["pulse"]
 
     # 異常記録表示: 14日以内かつ当月のみ（どちらか一方でも外れたら非表示）
-    today = pd.Timestamp.now()
-    cutoff = today - pd.Timedelta(days=14)
-    df_window = df_p[(df_p["date"] >= cutoff) & (df_p["date"].dt.month == today.month)]
+    today_jst = dt.now(JST).date()
+    cutoff = pd.Timestamp(today_jst - timedelta(days=14))
+    df_window = df_p[(df_p["date"] >= cutoff) & (df_p["date"].dt.month == today_jst.month)]
     tachycardia = df_window[df_window["pulse"] > 100]
     bradycardia = df_window[df_window["pulse"] < 50]
 

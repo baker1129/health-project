@@ -140,7 +140,7 @@ def load_bp(start: date, end: date) -> pd.DataFrame:
 def load_meals(start: date, end: date) -> dict:
     if not MEALS_MD.exists():
         return {"eating_out": 0, "snack": 0, "no_breakfast_days": 0}
-    text = MEALS_MD.read_text(encoding="utf-8")
+    text = MEALS_MD.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     sections = re.split(r"\n(?=## \d{4}-\d{2}-\d{2})", text)
     eating_out, snack, no_breakfast = 0, 0, 0
     for section in sections:
@@ -165,7 +165,7 @@ def load_meals(start: date, end: date) -> dict:
 def load_exercise(start: date, end: date) -> list[str]:
     if not EXERCISE_MD.exists():
         return []
-    text = EXERCISE_MD.read_text(encoding="utf-8")
+    text = EXERCISE_MD.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     sections = re.split(r"\n(?=## \d{4}-\d{2}-\d{2})", text)
     entries = []
     for section in sections:
