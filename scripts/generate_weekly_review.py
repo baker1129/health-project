@@ -47,6 +47,16 @@ def should_run() -> bool:
     if not has_night:
         print(f"直近の水曜日（{wed_str}）の夜血圧がまだ入力されていません。スキップします。")
         return False
+
+    # 今週分のレビューがすでに生成済みならスキップ（無駄なコミット防止）
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    for f in sorted(ARCHIVE_DIR.glob("weekly_review_week*.md")):
+        content = f.read_text(encoding="utf-8")
+        dm = re.search(r"## (\d{4}-\d{2}-\d{2}) → (\d{4}-\d{2}-\d{2})", content)
+        if dm and date.fromisoformat(dm.group(2)) == last_wednesday:
+            print(f"直近の水曜日（{wed_str}）のレビューはすでに生成済みです。スキップします。")
+            return False
+
     return True
 
 
