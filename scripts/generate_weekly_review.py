@@ -61,6 +61,10 @@ def get_week_info() -> tuple[int, date, date, bool]:
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     today = datetime.now(JST).date()
 
+    # 週終了日は「直近の水曜日」（今日が水曜なら今日、それ以外は遡る）
+    days_since_wed = (today.weekday() - 2) % 7
+    week_end = today - timedelta(days=days_since_wed)
+
     existing = sorted(ARCHIVE_DIR.glob("weekly_review_week*.md"))
     latest_num   = 0
     latest_start: date | None = None
@@ -81,14 +85,14 @@ def get_week_info() -> tuple[int, date, date, bool]:
     if latest_end is None:
         # アーカイブなし → 初回生成（プロジェクト開始日から）
         project_start = date(2026, 4, 29)
-        return 1, project_start, today, False
+        return 1, project_start, week_end, False
 
-    if latest_end == today:
-        # 同週の上書き更新（当日データが追加されたケース）
-        return latest_num, latest_start, today, True
+    if latest_end == week_end:
+        # 同週の上書き更新（当週データが追加されたケース）
+        return latest_num, latest_start, week_end, True
 
     # 新しい週の生成
-    return latest_num + 1, latest_end + timedelta(days=1), today, False
+    return latest_num + 1, latest_end + timedelta(days=1), week_end, False
 
 
 # ---------------------------------------------------------------------------
