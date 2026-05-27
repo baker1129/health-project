@@ -26,6 +26,11 @@ CURRENT_FILE = REVIEWS_DIR / "weekly_review.md"
 JST = timezone(timedelta(hours=9))
 FORCE = "--force" in sys.argv
 
+GOALS = [
+    (88.9, "第1目標"),
+    (82.9, "第2目標"),
+]
+
 
 # ---------------------------------------------------------------------------
 # 実行条件チェック
@@ -190,7 +195,7 @@ def bp_judge(sys_val: float, dia_val: float) -> str:
 # 各セクション生成
 # ---------------------------------------------------------------------------
 
-def build_weight_section(w_df: pd.DataFrame, target: float = 88.9) -> str:
+def build_weight_section(w_df: pd.DataFrame) -> str:
     if w_df.empty:
         return "- データなし"
     w_start = w_df.iloc[0]["weight"]
@@ -204,7 +209,14 @@ def build_weight_section(w_df: pd.DataFrame, target: float = 88.9) -> str:
     if not w_df["bodyfat"].isna().all():
         bf_vals = w_df["bodyfat"].dropna()
         lines.append(f"- 体脂肪率: {bf_vals.min():.1f}〜{bf_vals.max():.1f}%（平均 {bf_vals.mean():.1f}%）")
-    lines.append(f"- 第1目標（{target} kg）まで: あと **{w_end - target:.1f} kg**")
+    for target_kg, label in GOALS:
+        if w_end <= target_kg:
+            lines.append(f"- ✅ {label}（{target_kg} kg）: **達成済み**")
+        else:
+            lines.append(f"- {label}（{target_kg} kg）まで: あと **{w_end - target_kg:.1f} kg**")
+            break
+    else:
+        lines.append("- ✅ 全目標達成！最終目標（生活習慣確立）を継続中")
     return "\n".join(lines)
 
 
@@ -238,16 +250,13 @@ def build_bp_section(bp_morning: pd.DataFrame, bp_night: pd.DataFrame) -> str:
             else:
                 lines.append(f"- CPAP未着用日（{off_dates}）: 朝収縮期 {off_sys:.1f} mmHg")
 
-    # 脈拍異常（複数日継続なら⚠️、単発は記録のみ）
+    # 脈拍異常（複数日継続時のみ記録）
     all_bp = pd.concat([bp_morning, bp_night])
     anomalies = all_bp[all_bp["pulse"] > 100]
     anomaly_days = anomalies["date"].nunique() if not anomalies.empty else 0
     if anomaly_days >= 2:
         for _, row in anomalies.iterrows():
             lines.append(f"- ⚠️ 脈拍異常: {row['date']} {row['time']} / {row['pulse']:.0f} bpm（頻脈）")
-    elif anomaly_days == 1:
-        row = anomalies.iloc[0]
-        lines.append(f"- 脈拍メモ: {row['date']} {row['time']} / {row['pulse']:.0f} bpm（単発・経過観察）")
 
     return "\n".join(lines)
 
@@ -279,8 +288,9 @@ def build_analysis(
 
     # 体重
     if not w_df.empty and len(w_df) > 1:
-        diff = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
-        avg  = w_df["weight"].mean()
+        diff      = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
+        avg       = w_df["weight"].mean()
+        w_end_val = w_df.iloc[-1]["weight"]
         if diff < -1:
             lines.append(f"体重は週で {abs(diff):.1f} kg 減少（週平均 {avg:.1f} kg）。食事コントロールが機能している。")
         elif diff < 0:
@@ -289,6 +299,8 @@ def build_analysis(
             lines.append(f"体重はほぼ横ばい（{diff:+.1f} kg、週平均 {avg:.1f} kg）。停滞期の可能性。運動量を増やすタイミング。")
         else:
             lines.append(f"体重が {diff:+.1f} kg 増加（週平均 {avg:.1f} kg）。食事・運動を見直したい。")
+        if w_end_val <= GOALS[0][0]:
+            lines.append(f"✅ {GOALS[0][1]}（{GOALS[0][0]} kg）を達成。次は{GOALS[1][1]}（{GOALS[1][0]} kg）に向けて継続。")
 
     # 血圧
     if not bp_morning.empty:
@@ -341,6 +353,158 @@ def build_analysis(
 
 
 # ---------------------------------------------------------------------------
+# 良かったこと・ダメだったこと・来週の作戦
+# ---------------------------------------------------------------------------
+
+def _walk_goal_days(w_end: float) -> int:
+    """現在のフェーズに応じた週間歩行目標日数（第1目標達成後は5日）。"""
+    return 5 if w_end <= GOALS[0][0] else 3
+
+
+def build_good_points(
+    w_df: pd.DataFrame,
+    bp_morning: pd.DataFrame,
+    meals: dict,
+    exercise: list[str],
+) -> str:
+    points = []
+    w_end = w_df.iloc[-1]["weight"] if not w_df.empty else None
+
+    if w_end is not None:
+        for target_kg, label in GOALS:
+            if w_end <= target_kg:
+                points.append(f"✅ {label}（{target_kg} kg）達成！")
+
+    if len(w_df) >= 5:
+        points.append(f"体重を {len(w_df)} 日記録（目標5日以上達成）")
+
+    if len(w_df) >= 2:
+        diff = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
+        if diff < -1.0:
+            points.append(f"週で {abs(diff):.1f} kg 減少")
+        elif diff < 0:
+            points.append("体重がわずかに減少（方向は正しい）")
+
+    if not bp_morning.empty:
+        avg_sys = bp_morning["systolic"].mean()
+        avg_dia = bp_morning["diastolic"].mean()
+        if avg_sys < 130 and avg_dia < 85:
+            points.append(f"朝血圧 {avg_sys:.0f}/{avg_dia:.0f} mmHg と良好")
+
+    if not bp_morning.empty and "memo" in bp_morning.columns:
+        off_count = bp_morning["memo"].str.contains("cpap:off", na=False).sum()
+        on_count  = bp_morning["memo"].str.contains("cpap:on",  na=False).sum()
+        if off_count == 0 and on_count > 0:
+            points.append(f"CPAP {on_count} 日着用（完全着用）")
+
+    if meals["snack"] == 0:
+        points.append("夜食・間食なし")
+
+    ex_days   = len(exercise)
+    goal_days = _walk_goal_days(w_end) if w_end is not None else 3
+    if ex_days >= goal_days:
+        points.append(f"運動 {ex_days} 日実施（目標 {goal_days} 日以上達成）")
+    elif ex_days >= 1:
+        points.append(f"運動 {ex_days} 日実施")
+
+    return "\n".join(f"- {p}" for p in points) if points else "- （特記なし）"
+
+
+def build_bad_points(
+    w_df: pd.DataFrame,
+    bp_morning: pd.DataFrame,
+    meals: dict,
+    exercise: list[str],
+    record_days: int,
+) -> str:
+    points = []
+    w_end = w_df.iloc[-1]["weight"] if not w_df.empty else None
+
+    if len(w_df) < 5:
+        points.append(f"体重記録 {len(w_df)} 日（目標5日以上に未達）")
+
+    if len(w_df) >= 2:
+        diff = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
+        if diff > 0.5:
+            points.append(f"体重 {diff:+.1f} kg 増加")
+
+    if not bp_morning.empty:
+        avg_sys = bp_morning["systolic"].mean()
+        avg_dia = bp_morning["diastolic"].mean()
+        if avg_sys >= 140 or avg_dia >= 90:
+            points.append(f"朝血圧 {avg_sys:.0f}/{avg_dia:.0f} mmHg（高め・受診検討）")
+        elif avg_sys >= 130 or avg_dia >= 85:
+            points.append(f"朝血圧 {avg_sys:.0f}/{avg_dia:.0f} mmHg（やや高め）")
+
+    if not bp_morning.empty and "memo" in bp_morning.columns:
+        off_count = bp_morning["memo"].str.contains("cpap:off", na=False).sum()
+        if off_count >= 1:
+            points.append(f"CPAP未着用 {off_count} 日")
+
+    if meals["snack"] >= 1:
+        points.append(f"夜食・間食 {meals['snack']} 回")
+
+    if meals["no_breakfast_days"] >= 3:
+        points.append(f"朝食なし {meals['no_breakfast_days']} 日（多め）")
+
+    ex_days   = len(exercise)
+    goal_days = _walk_goal_days(w_end) if w_end is not None else 3
+    if ex_days == 0:
+        points.append("運動なし")
+    elif ex_days < goal_days:
+        points.append(f"運動 {ex_days} 日（目標 {goal_days} 日以上に未達）")
+
+    return "\n".join(f"- {p}" for p in points) if points else "- （特記なし）"
+
+
+def build_next_strategy(
+    w_df: pd.DataFrame,
+    bp_morning: pd.DataFrame,
+    meals: dict,
+    exercise: list[str],
+) -> str:
+    strategies = []
+    w_end = w_df.iloc[-1]["weight"] if not w_df.empty else None
+
+    if w_end is not None:
+        for target_kg, label in GOALS:
+            if w_end > target_kg:
+                remaining = w_end - target_kg
+                if remaining <= 1.0:
+                    strategies.append(f"**{label}まであと {remaining:.1f} kg** — このペースで達成を")
+                break
+
+        if len(w_df) >= 2:
+            diff = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
+            if diff > 0.5:
+                strategies.append("食事量・夜間の間食を見直す")
+            elif abs(diff) <= 0.2 and len(exercise) < 3:
+                strategies.append("停滞気味のため運動量を増やす（10分でもOK）")
+
+    ex_days   = len(exercise)
+    goal_days = _walk_goal_days(w_end) if w_end is not None else 3
+    if ex_days == 0:
+        strategies.append(f"10分ウォーキング × {goal_days} 日以上を最低目標に")
+    elif ex_days < goal_days:
+        strategies.append(f"運動をあと {goal_days - ex_days} 日増やして週 {goal_days} 日達成を目指す")
+    else:
+        strategies.append(f"運動習慣を維持（週 {ex_days} 日 → 継続）")
+
+    if meals["no_breakfast_days"] >= 3:
+        strategies.append("プロテイン・ナッツなど簡単なもので朝食を習慣化する")
+
+    if meals["snack"] >= 2:
+        strategies.append("就寝2時間前以降は食べない")
+
+    if not bp_morning.empty:
+        avg_sys = bp_morning["systolic"].mean()
+        if avg_sys >= 130:
+            strategies.append("塩分を控え、CPAP着用と睡眠を継続確認")
+
+    return "\n".join(f"- {s}" for s in strategies) if strategies else "- 現状維持を継続"
+
+
+# ---------------------------------------------------------------------------
 # レビュー本文生成
 # ---------------------------------------------------------------------------
 
@@ -358,6 +522,13 @@ def build_review(week_num: int, start: date, end: date) -> str:
     meals_sec    = build_meals_section(meals, record_days)
     exercise_sec = build_exercise_section(exercise)
     analysis_sec = build_analysis(w_df, bp_morning, bp_night, meals, exercise)
+    good_sec     = build_good_points(w_df, bp_morning, meals, exercise)
+    bad_sec      = build_bad_points(w_df, bp_morning, meals, exercise, record_days)
+    strategy_sec = build_next_strategy(w_df, bp_morning, meals, exercise)
+
+    w_end_val    = w_df.iloc[-1]["weight"] if not w_df.empty else 999.0
+    walk_days    = _walk_goal_days(w_end_val)
+    min_goals    = f"- 体重記録：5日以上\n- 歩行：10分 × {walk_days}日以上"
 
     return f"""# Weekly Review
 
@@ -391,21 +562,20 @@ def build_review(week_num: int, start: date, end: date) -> str:
 ---
 
 ### 良かったこと
--
+{good_sec}
 
 ### ダメだったこと
--
+{bad_sec}
 
 ---
 
 ### 来週の作戦
--
+{strategy_sec}
 
 ---
 
 ### 最低目標
-- 体重記録：5日以上
-- 歩行：10分 × 3日以上
+{min_goals}
 """
 
 
