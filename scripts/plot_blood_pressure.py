@@ -4,8 +4,7 @@ import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
 import matplotlib.pyplot as plt
 import pandas as pd
-
-plt.rcParams['font.family'] = 'Meiryo'
+import japanize_matplotlib  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 BP_CSV = ROOT / "logs" / "daily" / "blood_pressure.csv"
