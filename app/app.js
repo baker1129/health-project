@@ -452,6 +452,7 @@ async function submit() {
 
 function clearForm() {
   Object.keys(drafts).forEach(k => delete drafts[k]);
+  chartRawData = null;
   ['am-bp1','am-bp2','pm-bp1','pm-bp2','weight','bodyfat',
    'eating-out','snack-count','breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
     $(id).value = '';
@@ -474,6 +475,275 @@ function closeSettings() {
   $('settings-modal').classList.add('hidden');
 }
 
+// ── Charts ────────────────────────────────────────────────────────────────────
+let weightChart = null;
+let bpChart = null;
+let chartRawData = null;
+let chartPeriodDays = 14;
+
+function rolling7(arr) {
+  return arr.map((_, i) => {
+    const slice = arr.slice(Math.max(0, i - 6), i + 1).filter(v => v != null);
+    return slice.length ? slice.reduce((a, b) => a + b, 0) / slice.length : null;
+  });
+}
+
+function filterDays(entries, days) {
+  if (!days) return entries;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days + 1);
+  return entries.filter(e => new Date(e.date) >= cutoff);
+}
+
+function fmtDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function parseWeightRows(content) {
+  return content.split('\n').slice(1)
+    .filter(Boolean)
+    .map(line => {
+      const [date, weight] = line.split(',');
+      return { date: date.trim(), weight: parseFloat(weight) };
+    })
+    .filter(r => r.date && !isNaN(r.weight))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function parseBPRows(content) {
+  return content.split('\n').slice(1)
+    .filter(Boolean)
+    .map(line => {
+      const parts = line.split(',');
+      const [date, time, s1, d1, , s2, d2] = parts;
+      const sys = (parseFloat(s1) + parseFloat(s2)) / 2;
+      const dia = (parseFloat(d1) + parseFloat(d2)) / 2;
+      return { date: date.trim(), time: time.trim(), sys, dia };
+    })
+    .filter(r => r.date && !isNaN(r.sys))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function drawWeightChart(rows, days) {
+  const filtered = filterDays(rows, days);
+  const labels  = filtered.map(r => fmtDate(r.date));
+  const weights = filtered.map(r => r.weight);
+  const avg     = rolling7(weights);
+
+  const ctx = $('weight-canvas').getContext('2d');
+  if (weightChart) weightChart.destroy();
+
+  weightChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '体重',
+          data: weights,
+          borderColor: 'rgba(0,122,255,0.45)',
+          borderWidth: 1.5,
+          pointRadius: 3,
+          pointBackgroundColor: 'rgba(0,122,255,0.7)',
+          tension: 0.3,
+          fill: false,
+        },
+        {
+          label: '7日平均',
+          data: avg,
+          borderColor: 'rgba(0,60,180,1)',
+          borderWidth: 2.5,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { boxWidth: 12, font: { size: 12 }, padding: 10 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} kg`,
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { font: { size: 11 }, maxTicksLimit: 8 } },
+        y: {
+          ticks: { font: { size: 11 }, callback: v => v.toFixed(1) },
+          title: { display: true, text: 'kg', font: { size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+function drawBPChart(rows, days) {
+  const morning  = rows.filter(r => r.time === 'morning');
+  const filtered = filterDays(morning, days);
+  const labels   = filtered.map(r => fmtDate(r.date));
+  const sys      = filtered.map(r => r.sys);
+  const dia      = filtered.map(r => r.dia);
+  const sysAvg   = rolling7(sys);
+  const diaAvg   = rolling7(dia);
+
+  const ctx = $('bp-canvas').getContext('2d');
+  if (bpChart) bpChart.destroy();
+
+  const refLine = (label, val, color) => ({
+    label, _ref: true,
+    data: Array(labels.length).fill(val),
+    borderColor: color,
+    borderWidth: 1,
+    borderDash: [4, 4],
+    pointRadius: 0,
+    fill: false,
+  });
+
+  bpChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '収縮期',
+          data: sys,
+          borderColor: 'rgba(255,59,48,0.4)',
+          borderWidth: 1.5,
+          pointRadius: 3,
+          pointBackgroundColor: 'rgba(255,59,48,0.65)',
+          tension: 0.3,
+          fill: false,
+        },
+        {
+          label: '収縮期 7日平均',
+          data: sysAvg,
+          borderColor: 'rgba(190,20,10,1)',
+          borderWidth: 2.5,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: false,
+        },
+        {
+          label: '拡張期',
+          data: dia,
+          borderColor: 'rgba(255,149,0,0.4)',
+          borderWidth: 1.5,
+          pointRadius: 3,
+          pointBackgroundColor: 'rgba(255,149,0,0.65)',
+          tension: 0.3,
+          fill: false,
+        },
+        {
+          label: '拡張期 7日平均',
+          data: diaAvg,
+          borderColor: 'rgba(180,80,0,1)',
+          borderWidth: 2.5,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: false,
+        },
+        refLine('140', 140, 'rgba(255,59,48,0.55)'),
+        refLine('130', 130, 'rgba(255,149,0,0.55)'),
+        refLine('90',   90, 'rgba(255,59,48,0.3)'),
+        refLine('85',   85, 'rgba(255,149,0,0.3)'),
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: {
+            boxWidth: 12,
+            font: { size: 11 },
+            padding: 8,
+            filter: (item, data) => !data.datasets[item.datasetIndex]._ref,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset._ref) return null;
+              return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)} mmHg`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { font: { size: 11 }, maxTicksLimit: 8 } },
+        y: {
+          min: 60,
+          max: 170,
+          ticks: { font: { size: 11 } },
+          title: { display: true, text: 'mmHg', font: { size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+async function loadAndRenderCharts(forceRefresh = false) {
+  const loadEl = $('chart-loading');
+
+  if (forceRefresh) chartRawData = null;
+
+  if (!cfg.token) {
+    loadEl.textContent = '⚙️ 設定からGitHub Tokenを入力してください';
+    loadEl.classList.remove('hidden');
+    return;
+  }
+
+  if (!chartRawData) {
+    loadEl.textContent = '読み込み中...';
+    loadEl.classList.remove('hidden');
+    try {
+      const [wFile, bpFile] = await Promise.all([
+        ghGet('logs/daily/weight.csv'),
+        ghGet('logs/daily/blood_pressure.csv'),
+      ]);
+      chartRawData = {
+        weight: parseWeightRows(wFile.content),
+        bp:     parseBPRows(bpFile.content),
+      };
+    } catch (e) {
+      loadEl.textContent = `読み込みエラー: ${e.message}`;
+      return;
+    }
+    loadEl.classList.add('hidden');
+  }
+
+  drawWeightChart(chartRawData.weight, chartPeriodDays);
+  drawBPChart(chartRawData.bp, chartPeriodDays);
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  const inputView = $('input-view');
+  const chartView = $('chart-view');
+  const tabInput  = $('tab-input');
+  const tabChart  = $('tab-chart');
+
+  if (tab === 'chart') {
+    inputView.classList.add('hidden');
+    chartView.classList.remove('hidden');
+    tabInput.classList.remove('tab-active');
+    tabChart.classList.add('tab-active');
+    loadAndRenderCharts();
+  } else {
+    chartView.classList.add('hidden');
+    inputView.classList.remove('hidden');
+    tabChart.classList.remove('tab-active');
+    tabInput.classList.add('tab-active');
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   currentDate = todayLocal();
@@ -490,6 +760,23 @@ document.addEventListener('DOMContentLoaded', () => {
   $('settings-modal').addEventListener('click', e => {
     if (e.target === $('settings-modal')) closeSettings();
   });
+
+  $('tab-input').addEventListener('click', () => switchTab('input'));
+  $('tab-chart').addEventListener('click', () => switchTab('chart'));
+
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('period-active'));
+      btn.classList.add('period-active');
+      chartPeriodDays = parseInt(btn.dataset.days) || 0;
+      if (chartRawData) {
+        drawWeightChart(chartRawData.weight, chartPeriodDays);
+        drawBPChart(chartRawData.bp, chartPeriodDays);
+      }
+    });
+  });
+
+  $('chart-refresh-btn').addEventListener('click', () => loadAndRenderCharts(true));
 
   if (!cfg.token) {
     openSettings();

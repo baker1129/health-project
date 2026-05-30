@@ -16,7 +16,13 @@
     <button id="settings-btn" class="icon-btn" aria-label="設定">⚙️</button>
   </header>
 
-  <main>
+  <nav class="tab-bar">
+    <button id="tab-input" class="tab-btn tab-active">入力</button>
+    <button id="tab-chart" class="tab-btn">グラフ</button>
+  </nav>
+
+  <!-- 入力タブ -->
+  <main id="input-view">
     <section class="card">
       <label class="field">
         <span class="field-label">日付</span>
@@ -110,6 +116,35 @@
     <div class="bottom-space"></div>
   </main>
 
+  <!-- グラフタブ -->
+  <div id="chart-view" class="hidden">
+    <div class="chart-controls">
+      <span class="chart-control-label">期間</span>
+      <button class="period-btn period-active" data-days="14">2週間</button>
+      <button class="period-btn" data-days="30">1ヶ月</button>
+      <button class="period-btn" data-days="0">全期間</button>
+      <button id="chart-refresh-btn" class="chart-refresh-btn" title="データ再読み込み">↻</button>
+    </div>
+
+    <div id="chart-loading" class="chart-loading hidden">読み込み中...</div>
+
+    <div class="chart-card">
+      <h2 class="section-title">体重</h2>
+      <div class="chart-container">
+        <canvas id="weight-canvas"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <h2 class="section-title">血圧（朝）</h2>
+      <div class="chart-container">
+        <canvas id="bp-canvas"></canvas>
+      </div>
+    </div>
+
+    <div class="bottom-space"></div>
+  </div>
+
   <div id="settings-modal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
@@ -145,6 +180,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

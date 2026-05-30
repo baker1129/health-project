@@ -160,6 +160,107 @@ input[type="radio"] {
 
 .bottom-space { height: 40px; }
 
+/* ── Tab bar ── */
+.tab-bar {
+  display: flex;
+  background: rgba(242, 242, 247, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 49px;
+  z-index: 90;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text2);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Chart view ── */
+#chart-view {
+  max-width: 480px;
+  margin: 0 auto;
+  padding-bottom: 8px;
+}
+
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.chart-control-label {
+  font-size: 13px;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+.period-btn {
+  padding: 5px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  font-size: 13px;
+  color: var(--text2);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.period-btn:active { opacity: 0.75; }
+
+.period-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.chart-refresh-btn {
+  margin-left: auto;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  font-size: 16px;
+  color: var(--text2);
+  cursor: pointer;
+}
+.chart-refresh-btn:active { opacity: 0.75; }
+
+.chart-loading {
+  text-align: center;
+  font-size: 13px;
+  color: var(--accent);
+  padding: 8px 16px;
+}
+
+.chart-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin: 0 16px 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.chart-container {
+  position: relative;
+  height: 220px;
+}
+
 .load-indicator {
   font-size: 12px;
   color: var(--accent);
