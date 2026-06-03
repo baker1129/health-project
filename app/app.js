@@ -322,6 +322,13 @@ async function loadForDate(date) {
 
   } catch (e) {
     console.error('load error:', e);
+    const is401 = e.message && e.message.includes(': 401');
+    if (is401) {
+      showMsg('⚙️ GitHub Tokenが無効または期限切れです。設定を確認してください', 'error');
+      openSettings();
+    } else {
+      showMsg(`読み込みエラー: ${e.message}`, 'error');
+    }
   }
 
   setLoadIndicator(false);
