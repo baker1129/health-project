@@ -247,6 +247,7 @@ input[type="radio"] {
   color: var(--accent);
   padding: 8px 16px;
 }
+.chart-loading.hidden { display: none; }
 
 .chart-card {
   background: var(--card);

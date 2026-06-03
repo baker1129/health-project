@@ -62,7 +62,7 @@ function fromB64(str) {
 
 function saveDraft(date) {
   if (!date) return;
-  drafts[date] = {
+  const draft = {
     weight:     $('weight').value,
     bodyfat:    $('bodyfat').value,
     amBp1:      $('am-bp1').value,
@@ -78,6 +78,19 @@ function saveDraft(date) {
     foodNote:   $('food-note').value,
     exercise:   $('exercise').value,
   };
+  const hasData = !!(
+    draft.weight || draft.bodyfat ||
+    draft.amBp1 || draft.amBp2 || draft.cpap ||
+    draft.pmBp1 || draft.pmBp2 ||
+    draft.eatingOut !== '' || draft.snackCount !== '' ||
+    draft.breakfast || draft.lunch || draft.dinner ||
+    draft.foodNote || draft.exercise
+  );
+  if (hasData) {
+    drafts[date] = draft;
+  } else {
+    delete drafts[date];
+  }
 }
 
 function applyDraft(draft) {
@@ -467,6 +480,7 @@ function clearForm() {
   document.querySelector('input[name="cpap"][value=""]').checked = true;
   currentDate = todayLocal();
   $('date').value = currentDate;
+  loadForDate(currentDate);
 }
 
 // ── Settings modal ────────────────────────────────────────────────────────────
