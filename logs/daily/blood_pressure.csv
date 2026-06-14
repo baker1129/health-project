@@ -84,3 +84,4 @@ date,time,systolic1,diastolic1,pulse1,systolic2,diastolic2,pulse2,memo
 2026-06-13,morning,134,90,69,122,86,66,cpap:off
 2026-06-14,morning,132,90,76,120,82,66,cpap:on
 2026-06-14,night,139,87,68,130,96,67,
+2026-06-15,morning,115,86,71,122,86,71,cpap:on
