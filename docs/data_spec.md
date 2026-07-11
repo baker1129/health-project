@@ -66,6 +66,8 @@ YYYY-MM-DD,morning/night,XXX,XX,XX,XXX,XX,XX,メモ
 - `pulse1/2`: 脈拍（bpm）1回目・2回目
 - `memo`: 任意メモ。朝行には `cpap:on` または `cpap:off` を記入
 - 1回計測の場合は systolic1=systolic2、diastolic1=diastolic2、pulse1=pulse2 に同じ値を入れる
+- 血圧を測り忘れた日でもCPAPだけは記録できる。その場合 systolic1〜pulse2 は空欄にし、memoにcpap:on/offのみ記入する
+  （例: `2026-07-11,morning,,,,,,,cpap:on`）
 
 ---
 

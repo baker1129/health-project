@@ -36,8 +36,11 @@ def load_weight() -> pd.DataFrame:
     return df[["date", "weight", "bodyfat"]].sort_values("date")
 
 
-def load_blood_pressure_raw() -> pd.DataFrame:
-    """2回計測形式・1回計測形式の両方に対応。平均値をsystolic/diastolic/pulseに格納する"""
+def load_blood_pressure_raw(require_bp: bool = True) -> pd.DataFrame:
+    """2回計測形式・1回計測形式の両方に対応。平均値をsystolic/diastolic/pulseに格納する。
+
+    require_bp=False にすると、血圧未計測（CPAPのみ記録など）の行も残す。
+    """
     df = pd.read_csv(BP_CSV)
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
@@ -53,7 +56,9 @@ def load_blood_pressure_raw() -> pd.DataFrame:
         for col in ["systolic", "diastolic", "pulse"]:
             df[col] = pd.to_numeric(df.get(col, pd.NA), errors="coerce")
 
-    df = df.dropna(subset=["date", "systolic", "diastolic"])
+    df = df.dropna(subset=["date"])
+    if require_bp:
+        df = df.dropna(subset=["systolic", "diastolic"])
     return df.sort_values(["date", "time"])
 
 
@@ -215,7 +220,8 @@ def detect_pulse_anomaly() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 def analyze_cpap() -> dict[str, str]:
-    df = load_blood_pressure_raw()
+    # 血圧未計測でもCPAP着用有無は記録されるため、血圧の有無で行を落とさない
+    df = load_blood_pressure_raw(require_bp=False)
     df_m = df[df["time"] == "morning"].copy()
 
     _no_data = {

@@ -163,9 +163,11 @@ function parseBP(text) {
 
 function upsertBP(src, date, time, bp1text, bp2text, memo) {
   const bp1 = parseBP(bp1text);
-  if (!bp1) return null;
-  const bp2 = parseBP(bp2text) || bp1;
-  const newRow = [date, time, ...bp1, ...bp2, memo || ''].join(',');
+  // 血圧未計測でもCPAPだけは記録できるよう、血圧欄は空のまま行を作る
+  if (!bp1 && !memo) return null;
+  const bp2 = bp1 ? (parseBP(bp2text) || bp1) : null;
+  const bpFields = bp1 ? [...bp1, ...bp2] : ['', '', '', '', '', ''];
+  const newRow = [date, time, ...bpFields, memo || ''].join(',');
   const lines = src.split('\n');
   const i = lines.findIndex(l => l.startsWith(`${date},${time},`));
   if (i === -1) return src.trimEnd() + '\n' + newRow + '\n';
@@ -248,11 +250,13 @@ function parseBPRow(src, date, time) {
   const line = src.split('\n').find(l => l.startsWith(`${date},${time},`));
   if (!line) return null;
   const [,, s1, d1, p1, s2, d2, p2, ...memoParts] = line.split(',');
-  const bp1 = `${s1}/${d1}/${p1}`;
-  const bp2 = `${s2}/${d2}/${p2}`;
+  const hasBp1 = s1 !== '' && d1 !== '' && p1 !== '';
+  const hasBp2 = s2 !== '' && d2 !== '' && p2 !== '';
+  const bp1 = hasBp1 ? `${s1}/${d1}/${p1}` : '';
+  const bp2 = hasBp2 ? `${s2}/${d2}/${p2}` : '';
   const memo = memoParts.join(',');
   const cpap = memo.includes('cpap:on') ? 'on' : memo.includes('cpap:off') ? 'off' : '';
-  return { bp1, bp2: bp1 === bp2 ? '' : bp2, cpap };
+  return { bp1, bp2: bp1 && bp1 === bp2 ? '' : bp2, cpap };
 }
 
 function parseDateSection(src, date) {
@@ -397,7 +401,7 @@ async function submit() {
     let cur = content, changed = false;
     for (const date of datesToSubmit) {
       const d = drafts[date];
-      if (parseBP(d.amBp1)) {
+      if (parseBP(d.amBp1) || d.cpap) {
         const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
         if (next) { cur = next; changed = true; }
       }
