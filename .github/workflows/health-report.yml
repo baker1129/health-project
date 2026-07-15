@@ -37,19 +37,41 @@ jobs:
           python scripts/update_readme.py
 
       - name: Commit updated reports
+        env:
+          TZ: Asia/Tokyo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add README.md reports/health_analysis.md reports/blood_pressure.png reports/weight.png
-          if git commit -m "Update health report [skip ci]"; then
-            n=0
-            until git push; do
-              n=$((n+1))
-              if [ "$n" -ge 5 ]; then echo "push failed after $n attempts"; exit 1; fi
-              sleep $((n*3))
-              git pull --rebase origin main
-            done
-          else
-            echo "No changes to commit"
-          fi
+          n=0
+          while true; do
+            git add README.md reports/health_analysis.md reports/blood_pressure.png reports/weight.png
+            if git diff --cached --quiet; then
+              echo "No changes to commit"
+              break
+            fi
+
+            git commit -m "Update health report [skip ci]"
+            if git push; then
+              break
+            fi
+
+            n=$((n+1))
+            if [ "$n" -ge 5 ]; then
+              echo "push failed after $n attempts"
+              exit 1
+            fi
+
+            # 入力アプリ側のコミットが近接するとworkflowの実行も競合し、他方が
+            # 僅差で先にpushすることがある。生成物同士をrebase/mergeすると
+            # コンフリクトで空回りするだけなので、リベースはせず最新のmainを
+            # 取り直してレポートを再生成してからやり直す。
+            sleep $((n*3))
+            git reset --hard HEAD~1
+            git fetch origin main
+            git reset --hard origin/main
+            python scripts/plot_weight.py
+            python scripts/plot_blood_pressure.py
+            python scripts/analyze_health.py
+            python scripts/update_readme.py
+          done

@@ -174,8 +174,29 @@ async function ghPut(path, content, sha, message) {
     body: JSON.stringify({ message, content: toB64(content), sha, branch: cfg.branch }),
   });
   if (!r.ok) {
-    const e = await r.json();
-    throw new Error(e.message || String(r.status));
+    const e = await r.json().catch(() => ({}));
+    const err = new Error(e.message || String(r.status));
+    err.status = r.status;
+    throw err;
+  }
+}
+
+// 同一ブランチへの複数ファイルのPUTは並列に投げるとGitHub側でref更新が
+// 競合し、片方が409/422で弾かれることがある（ファイル自体は別物でも起こる）。
+// 競合時はsha・内容を取り直して再試行することでユーザーにエラーを見せない。
+async function putUpsertWithRetry(path, buildContent, message, maxAttempts = 4) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const { content, sha } = await ghGet(path);
+    const next = buildContent(content);
+    if (!next) return 'unchanged';
+    try {
+      await ghPut(path, next, sha, message);
+      return 'updated';
+    } catch (e) {
+      const isConflict = e.status === 409 || e.status === 422;
+      if (!isConflict || attempt >= maxAttempts) throw e;
+      await new Promise(res => setTimeout(res, 300 * attempt));
+    }
   }
 }
 
@@ -401,22 +422,26 @@ async function loadForDate(date) {
 
 // ── Submit ────────────────────────────────────────────────────────────────────
 // 4ファイルはそれぞれ独立しているため、並列に読み書きして登録を高速化する。
+// ただし同一ブランチへの並列PUTはファイルが別物でもGitHub側でref更新が競合し
+// 409/422になることがあるため、putUpsertWithRetryが競合時に自動で取り直す。
 // 各submitXxxはghGet/ghPutの結果を{label, status: 'updated'|'unchanged'|'error', message?}に正規化して返す。
 
 async function submitWeight(datesToSubmit, dateLabel) {
   try {
-    const { content, sha } = await ghGet('logs/daily/weight.csv');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      const next = upsertWeight(cur, date, d.weight, d.bodyfat);
-      if (next) { cur = next; changed = true; }
-    }
-    if (changed) {
-      await ghPut('logs/daily/weight.csv', cur, sha, `Update 体重 for ${dateLabel}`);
-      return { label: '体重', status: 'updated' };
-    }
-    return { label: '体重', status: 'unchanged' };
+    const status = await putUpsertWithRetry(
+      'logs/daily/weight.csv',
+      (cur) => {
+        let changed = false;
+        for (const date of datesToSubmit) {
+          const d = drafts[date];
+          const next = upsertWeight(cur, date, d.weight, d.bodyfat);
+          if (next) { cur = next; changed = true; }
+        }
+        return changed ? cur : null;
+      },
+      `Update 体重 for ${dateLabel}`
+    );
+    return { label: '体重', status };
   } catch (e) {
     return { label: '体重', status: 'error', message: e.message };
   }
@@ -424,24 +449,26 @@ async function submitWeight(datesToSubmit, dateLabel) {
 
 async function submitBP(datesToSubmit, dateLabel) {
   try {
-    const { content, sha } = await ghGet('logs/daily/blood_pressure.csv');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      if (parseBP(d.amBp1) || d.cpap) {
-        const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
-        if (next) { cur = next; changed = true; }
-      }
-      if (parseBP(d.pmBp1)) {
-        const next = upsertBP(cur, date, 'night', d.pmBp1, d.pmBp2, '');
-        if (next) { cur = next; changed = true; }
-      }
-    }
-    if (changed) {
-      await ghPut('logs/daily/blood_pressure.csv', cur, sha, `Update BP for ${dateLabel}`);
-      return { label: '血圧', status: 'updated' };
-    }
-    return { label: '血圧', status: 'unchanged' };
+    const status = await putUpsertWithRetry(
+      'logs/daily/blood_pressure.csv',
+      (cur) => {
+        let changed = false;
+        for (const date of datesToSubmit) {
+          const d = drafts[date];
+          if (parseBP(d.amBp1) || d.cpap) {
+            const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
+            if (next) { cur = next; changed = true; }
+          }
+          if (parseBP(d.pmBp1)) {
+            const next = upsertBP(cur, date, 'night', d.pmBp1, d.pmBp2, '');
+            if (next) { cur = next; changed = true; }
+          }
+        }
+        return changed ? cur : null;
+      },
+      `Update BP for ${dateLabel}`
+    );
+    return { label: '血圧', status };
   } catch (e) {
     return { label: '血圧', status: 'error', message: e.message };
   }
@@ -449,22 +476,24 @@ async function submitBP(datesToSubmit, dateLabel) {
 
 async function submitMeals(datesToSubmit, dateLabel) {
   try {
-    const { content, sha } = await ghGet('logs/lifestyle/meals.md');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      const next = upsertMdSection(cur, date, buildMealsSection(date, {
-        breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
-        note: d.foodNote, eatingOut: d.eatingOut,
-        nightSnack: d.nightSnack, snack: d.snack,
-      }));
-      if (next) { cur = next; changed = true; }
-    }
-    if (changed) {
-      await ghPut('logs/lifestyle/meals.md', cur, sha, `Update 食事 for ${dateLabel}`);
-      return { label: '食事', status: 'updated' };
-    }
-    return { label: '食事', status: 'unchanged' };
+    const status = await putUpsertWithRetry(
+      'logs/lifestyle/meals.md',
+      (cur) => {
+        let changed = false;
+        for (const date of datesToSubmit) {
+          const d = drafts[date];
+          const next = upsertMdSection(cur, date, buildMealsSection(date, {
+            breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
+            note: d.foodNote, eatingOut: d.eatingOut,
+            nightSnack: d.nightSnack, snack: d.snack,
+          }));
+          if (next) { cur = next; changed = true; }
+        }
+        return changed ? cur : null;
+      },
+      `Update 食事 for ${dateLabel}`
+    );
+    return { label: '食事', status };
   } catch (e) {
     return { label: '食事', status: 'error', message: e.message };
   }
@@ -472,18 +501,20 @@ async function submitMeals(datesToSubmit, dateLabel) {
 
 async function submitExercise(datesToSubmit, dateLabel) {
   try {
-    const { content, sha } = await ghGet('logs/lifestyle/exercise.md');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      const next = upsertMdSection(cur, date, buildExerciseSection(date, d.exercise));
-      if (next) { cur = next; changed = true; }
-    }
-    if (changed) {
-      await ghPut('logs/lifestyle/exercise.md', cur, sha, `Update 運動 for ${dateLabel}`);
-      return { label: '運動', status: 'updated' };
-    }
-    return { label: '運動', status: 'unchanged' };
+    const status = await putUpsertWithRetry(
+      'logs/lifestyle/exercise.md',
+      (cur) => {
+        let changed = false;
+        for (const date of datesToSubmit) {
+          const d = drafts[date];
+          const next = upsertMdSection(cur, date, buildExerciseSection(date, d.exercise));
+          if (next) { cur = next; changed = true; }
+        }
+        return changed ? cur : null;
+      },
+      `Update 運動 for ${dateLabel}`
+    );
+    return { label: '運動', status };
   } catch (e) {
     return { label: '運動', status: 'error', message: e.message };
   }
