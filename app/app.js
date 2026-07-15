@@ -832,16 +832,80 @@ async function ghDispatchWorkflow(workflowFile, inputs) {
   }
 }
 
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
+async function ghLatestCommitDate(path) {
+  const r = await fetch(
+    `${API}/repos/${cfg.owner}/${cfg.repo}/commits?path=${encodeURIComponent(path)}&sha=${encodeURIComponent(cfg.branch)}&per_page=1`,
+    {
+      headers: {
+        Authorization: `token ${cfg.token}`,
+        Accept: 'application/vnd.github+json',
+      },
+    }
+  );
+  if (!r.ok) throw new Error(`commits ${path}: ${r.status}`);
+  const arr = await r.json();
+  return arr.length ? new Date(arr[0].commit.committer.date) : null;
+}
+
+// 週次レビューが「恐らく最新か」をコミット日時で近似判定する参考情報。
+// 実際の差分判定はgenerate_weekly_review.py側（git diff）が正であり、ここでの
+// 判定はあくまで確認メッセージの出し分けにのみ使う。判定不能・失敗・タイムアウト
+// 時は常に null を返して通常フロー（無条件で生成できる）に倒し、誤判定で生成が
+// できなくなることは絶対にないようにする。
+async function checkWeeklyReportUpToDate() {
+  try {
+    const dataPaths = [
+      'logs/daily/weight.csv',
+      'logs/daily/blood_pressure.csv',
+      'logs/lifestyle/meals.md',
+      'logs/lifestyle/exercise.md',
+    ];
+    const [dataDates, reviewDate] = await withTimeout(
+      Promise.all([
+        Promise.all(dataPaths.map(ghLatestCommitDate)),
+        ghLatestCommitDate('logs/reviews/archive/weekly'),
+      ]),
+      5000
+    );
+    const validDates = dataDates.filter(Boolean);
+    if (!reviewDate || validDates.length === 0) return null;
+    const latestData = new Date(Math.max(...validDates.map(d => d.getTime())));
+    return reviewDate >= latestData;
+  } catch (e) {
+    console.error('up-to-date check error:', e);
+    return null;
+  }
+}
+
 async function triggerWeeklyReport() {
   if (!cfg.token) {
     showReportMsg('⚙️ 設定から GitHub Token を入力してください', 'error');
     openSettings();
     return;
   }
-  if (!confirm('今週分の週次レビューを生成しますか？（既存の内容があれば上書きされます）')) return;
 
   const btn = $('weekly-report-btn');
   btn.disabled = true;
+  showReportMsg('更新有無を確認中...', 'info');
+
+  const upToDate = await checkWeeklyReportUpToDate();
+  const confirmMsg = upToDate === true
+    ? '直近のデータに変更が見当たらないため、既に最新の可能性があります。それでも生成しますか？'
+    : '今週分の週次レビューを生成しますか？（既存の内容があれば上書きされます）';
+
+  if (!confirm(confirmMsg)) {
+    $('report-msg').classList.add('hidden');
+    btn.disabled = false;
+    return;
+  }
+
   showReportMsg('生成をリクエスト中...', 'info');
   try {
     await ghDispatchWorkflow('weekly-review.yml', { force: 'true' });
