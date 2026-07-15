@@ -87,28 +87,38 @@ def merge_health_data() -> pd.DataFrame:
 # 血圧リスク判定（日次平均ベース）
 # ---------------------------------------------------------------------------
 
-def detect_bp_risk(df: pd.DataFrame) -> dict[str, str]:
-    if df.empty:
+def detect_bp_risk() -> dict[str, str]:
+    """朝の血圧を優先し、直近7日の朝平均で判定する（CLAUDE.mdの評価方針に準拠）。
+    体重記録の有無に関わらず判定できるよう、血圧データのみから独立して計算する
+    （体重とinner joinしたdfを使うと、体重未記録日の血圧が判定から漏れるため）。
+    """
+    df_m = load_blood_pressure_raw()
+    df_m = df_m[df_m["time"] == "morning"]
+
+    if df_m.empty:
         return {
             "latest_bp": "データ不足",
             "bp_status": "血圧判定: データ不足",
             "console": "血圧判定: データ不足",
         }
 
-    latest = df.iloc[-1]
-    sys = latest["systolic"]
-    dia = latest["diastolic"]
-    latest_bp = f"{sys:.1f}/{dia:.1f} mmHg"
+    latest = df_m.iloc[-1]
+    latest_bp = f"{latest['systolic']:.1f}/{latest['diastolic']:.1f} mmHg"
 
-    if sys >= 140 or dia >= 90:
+    recent = df_m.tail(7)
+    avg_sys = recent["systolic"].mean()
+    avg_dia = recent["diastolic"].mean()
+
+    if avg_sys >= 140 or avg_dia >= 90:
         bp_status = "⚠️ 血圧高め: 継続する場合は主治医に相談"
-    elif sys >= 130 or dia >= 85:
+    elif avg_sys >= 130 or avg_dia >= 85:
         bp_status = "注意: やや高めです"
     else:
         bp_status = "良好: 現時点では高値ではありません"
 
     console = "\n".join([
-        f"最新日平均血圧: {latest_bp}",
+        f"直近の朝血圧: {latest_bp}",
+        f"直近7日 朝平均: {avg_sys:.1f}/{avg_dia:.1f} mmHg",
         bp_status,
     ])
     return {"latest_bp": latest_bp, "bp_status": bp_status, "console": console}
@@ -189,10 +199,10 @@ def detect_pulse_anomaly() -> dict[str, str]:
 
     latest_pulse = df_p.iloc[-1]["pulse"]
 
-    # 異常記録表示: 14日以内かつ当月のみ（どちらか一方でも外れたら非表示）
+    # 異常記録表示: 直近14日以内（月境界をまたいでも正しく14日分を見る）
     today_jst = dt.now(JST).date()
     cutoff = pd.Timestamp(today_jst - timedelta(days=14))
-    df_window = df_p[(df_p["date"] >= cutoff) & (df_p["date"].dt.month == today_jst.month)]
+    df_window = df_p[df_p["date"] >= cutoff]
     tachycardia = df_window[df_window["pulse"] > 100]
     bradycardia = df_window[df_window["pulse"] < 50]
 
@@ -300,7 +310,13 @@ def analyze_cpap() -> dict[str, str]:
 # 体重×血圧 相関
 # ---------------------------------------------------------------------------
 
-def calc_correlation(df: pd.DataFrame) -> dict[str, str]:
+def calc_correlation(df: pd.DataFrame, window_days: int = 60) -> dict[str, str]:
+    # 直近window_days日に絞って算出する（全期間だと初期の生活習慣が薄まり、
+    # 直近の傾向が見えにくくなるため）
+    if not df.empty:
+        cutoff = df["date"].max() - pd.Timedelta(days=window_days - 1)
+        df = df[df["date"] >= cutoff]
+
     if len(df) < 5:
         text = "データ不足（最低5日以上必要）"
         return {"correlation": text, "console": f"体重×血圧 相関: {text}"}
@@ -315,9 +331,9 @@ def calc_correlation(df: pd.DataFrame) -> dict[str, str]:
     else:
         status = "明確な相関はまだ見えません"
 
-    markdown_text = f"収縮期: {corr_sys:.2f}<br>拡張期: {corr_dia:.2f}<br>{status}"
+    markdown_text = f"収縮期: {corr_sys:.2f}<br>拡張期: {corr_dia:.2f}<br>{status}（直近{window_days}日）"
     console = "\n".join([
-        f"体重×収縮期血圧 相関: {corr_sys:.2f}",
+        f"体重×収縮期血圧 相関: {corr_sys:.2f}（直近{window_days}日）",
         f"体重×拡張期血圧 相関: {corr_dia:.2f}",
         status,
     ])
@@ -329,14 +345,17 @@ def calc_correlation(df: pd.DataFrame) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 def detect_weight_bp_pattern(df: pd.DataFrame) -> dict[str, str]:
-    if len(df) < 7:
-        text = "判定不可（最低7日以上必要）"
+    # 直近7日平均とその前7日平均を比較する（初日と最終日だけの単純比較だと
+    # 測定ノイズを増減と誤判定するため、週単位の平均同士で判断する）
+    if len(df) < 14:
+        text = "判定不可（比較対象となる前の7日分を含め最低14日以上必要）"
         return {"pattern": text, "console": f"体重増→血圧上昇検出: {text}"}
 
     recent = df.tail(7)
-    weight_diff = recent["weight"].iloc[-1] - recent["weight"].iloc[0]
-    sys_diff    = recent["systolic"].iloc[-1] - recent["systolic"].iloc[0]
-    dia_diff    = recent["diastolic"].iloc[-1] - recent["diastolic"].iloc[0]
+    prev   = df.iloc[-14:-7]
+    weight_diff = recent["weight"].mean()    - prev["weight"].mean()
+    sys_diff    = recent["systolic"].mean()  - prev["systolic"].mean()
+    dia_diff    = recent["diastolic"].mean() - prev["diastolic"].mean()
 
     changes = (
         f"体重: {weight_diff:+.2f} kg<br>"
@@ -359,7 +378,7 @@ def detect_weight_bp_pattern(df: pd.DataFrame) -> dict[str, str]:
         console_extra = [status]
 
     console = "\n".join([
-        "直近7日変化:",
+        "直近7日平均 vs その前7日平均:",
         f"- 体重: {weight_diff:+.2f} kg",
         f"- 収縮期血圧: {sys_diff:+.1f} mmHg",
         f"- 拡張期血圧: {dia_diff:+.1f} mmHg",
@@ -402,7 +421,7 @@ def analyze_meals() -> dict[str, str]:
         return {"weekly_summary": "記録なし", "console": "食事分析: 記録なし"}
 
     latest_date = max(r["date"] for r in records)
-    week_start  = latest_date - __import__("datetime").timedelta(days=6)
+    week_start  = latest_date - timedelta(days=6)
     week = [r for r in records if r["date"] >= week_start]
 
     eo_total   = sum(r["eating_out"] for r in week if r["eating_out"] is not None)
@@ -437,7 +456,7 @@ def write_markdown_report(
 
 | 項目 | 結果 |
 |---|---|
-| 最新日平均血圧 | {bp_result["latest_bp"]} |
+| 直近の朝血圧 | {bp_result["latest_bp"]} |
 | 判定 | {bp_result["bp_status"]} |
 | 朝の血圧 | {bp_time_result["morning_summary"]} |
 | 夜の血圧 | {bp_time_result["night_summary"]} |
@@ -468,7 +487,7 @@ def main() -> None:
         ANALYSIS_MD.write_text("### 最新サマリー\n\n分析できるデータがありません。\n", encoding="utf-8")
         return
 
-    bp_result          = detect_bp_risk(df)
+    bp_result          = detect_bp_risk()
     bp_time_result     = analyze_bp_by_time()
     pulse_result       = detect_pulse_anomaly()
     cpap_result        = analyze_cpap()

@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import japanize_matplotlib  # noqa: F401
 
+from goals import GOALS
+
 ROOT = Path(__file__).resolve().parents[1]
 WEIGHT_CSV = ROOT / "logs" / "daily" / "weight.csv"
 REPORT_DIR = ROOT / "reports"
@@ -46,7 +48,11 @@ def main() -> None:
         df["date"], df["weight_7d_avg"],
         color="#1d4e8f", linewidth=2.5, label="7日平均",
     )
-    ax1.axhline(82.9, color="#34c759", linewidth=1, linestyle="--", alpha=0.7, label="第2目標 82.9kg")
+    # 直近7日平均を基準に、まだ達成していない最初の目標を基準線に表示する
+    latest_avg = df["weight_7d_avg"].iloc[-1]
+    target_kg, target_label = next(((kg, label) for kg, label in GOALS if latest_avg > kg), GOALS[-1])
+    ax1.axhline(target_kg, color="#34c759", linewidth=1, linestyle="--", alpha=0.7,
+                label=f"{target_label} {target_kg}kg")
 
     ax1.set_ylabel("体重 (kg)", fontsize=11)
     ax1.set_title("体重推移", fontsize=13, fontweight="bold")

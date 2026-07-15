@@ -102,6 +102,21 @@ function saveDraft(date) {
   } else {
     delete drafts[date];
   }
+  persistDrafts();
+}
+
+// リロードや誤タブクローズで未送信の入力が消えないよう、下書きをlocalStorageにも保存する
+function persistDrafts() {
+  localStorage.setItem('health_drafts', JSON.stringify(drafts));
+}
+
+function restoreDrafts() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('health_drafts') || '{}');
+    Object.assign(drafts, saved);
+  } catch (e) {
+    console.error('draft restore error:', e);
+  }
 }
 
 function applyDraft(draft) {
@@ -318,6 +333,9 @@ async function loadForDate(date) {
   }
 
   setLoadIndicator(true);
+  // 既存データの取得が終わるまでは送信をブロックする（未取得のフィールドが
+  // 空のまま送信され、記録済みの内容を上書き消去してしまうのを防ぐ）
+  $('submit-btn').disabled = true;
 
   try {
     const [wFile, bpFile, mealsFile, exFile] = await Promise.all([
@@ -367,9 +385,99 @@ async function loadForDate(date) {
   }
 
   setLoadIndicator(false);
+  $('submit-btn').disabled = false;
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────────
+// 4ファイルはそれぞれ独立しているため、並列に読み書きして登録を高速化する。
+// 各submitXxxはghGet/ghPutの結果を{label, status: 'updated'|'unchanged'|'error', message?}に正規化して返す。
+
+async function submitWeight(datesToSubmit, dateLabel) {
+  try {
+    const { content, sha } = await ghGet('logs/daily/weight.csv');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      const next = upsertWeight(cur, date, d.weight, d.bodyfat);
+      if (next) { cur = next; changed = true; }
+    }
+    if (changed) {
+      await ghPut('logs/daily/weight.csv', cur, sha, `Update 体重 for ${dateLabel}`);
+      return { label: '体重', status: 'updated' };
+    }
+    return { label: '体重', status: 'unchanged' };
+  } catch (e) {
+    return { label: '体重', status: 'error', message: e.message };
+  }
+}
+
+async function submitBP(datesToSubmit, dateLabel) {
+  try {
+    const { content, sha } = await ghGet('logs/daily/blood_pressure.csv');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      if (parseBP(d.amBp1) || d.cpap) {
+        const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
+        if (next) { cur = next; changed = true; }
+      }
+      if (parseBP(d.pmBp1)) {
+        const next = upsertBP(cur, date, 'night', d.pmBp1, d.pmBp2, '');
+        if (next) { cur = next; changed = true; }
+      }
+    }
+    if (changed) {
+      await ghPut('logs/daily/blood_pressure.csv', cur, sha, `Update BP for ${dateLabel}`);
+      return { label: '血圧', status: 'updated' };
+    }
+    return { label: '血圧', status: 'unchanged' };
+  } catch (e) {
+    return { label: '血圧', status: 'error', message: e.message };
+  }
+}
+
+async function submitMeals(datesToSubmit, dateLabel) {
+  try {
+    const { content, sha } = await ghGet('logs/lifestyle/meals.md');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      const next = upsertMdSection(cur, date, buildMealsSection(date, {
+        breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
+        note: d.foodNote, eatingOut: d.eatingOut,
+        nightSnack: d.nightSnack, snack: d.snack,
+      }));
+      if (next) { cur = next; changed = true; }
+    }
+    if (changed) {
+      await ghPut('logs/lifestyle/meals.md', cur, sha, `Update 食事 for ${dateLabel}`);
+      return { label: '食事', status: 'updated' };
+    }
+    return { label: '食事', status: 'unchanged' };
+  } catch (e) {
+    return { label: '食事', status: 'error', message: e.message };
+  }
+}
+
+async function submitExercise(datesToSubmit, dateLabel) {
+  try {
+    const { content, sha } = await ghGet('logs/lifestyle/exercise.md');
+    let cur = content, changed = false;
+    for (const date of datesToSubmit) {
+      const d = drafts[date];
+      const next = upsertMdSection(cur, date, buildExerciseSection(date, d.exercise));
+      if (next) { cur = next; changed = true; }
+    }
+    if (changed) {
+      await ghPut('logs/lifestyle/exercise.md', cur, sha, `Update 運動 for ${dateLabel}`);
+      return { label: '運動', status: 'updated' };
+    }
+    return { label: '運動', status: 'unchanged' };
+  } catch (e) {
+    return { label: '運動', status: 'error', message: e.message };
+  }
+}
+
 async function submit() {
   if (!cfg.token) {
     showMsg('⚙️ 設定から GitHub Token を入力してください', 'error');
@@ -389,95 +497,22 @@ async function submit() {
   setLoading(true);
   showMsg('送信中...', 'info');
 
-  const updated = [], unchanged = [], errors = [];
   const dateLabel = datesToSubmit.length > 1
     ? `${datesToSubmit[0]} 他${datesToSubmit.length - 1}日`
     : datesToSubmit[0];
 
-  // 体重（全日付を1ファイルにまとめて書き込み）
-  try {
-    const { content, sha } = await ghGet('logs/daily/weight.csv');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      const next = upsertWeight(cur, date, d.weight, d.bodyfat);
-      if (next) { cur = next; changed = true; }
-    }
-    if (changed) {
-      await ghPut('logs/daily/weight.csv', cur, sha, `Update 体重 for ${dateLabel}`);
-      updated.push('体重');
-    } else {
-      unchanged.push('体重');
-    }
-  } catch (e) {
-    errors.push(`体重: ${e.message}`);
-  }
+  const results = await Promise.all([
+    submitWeight(datesToSubmit, dateLabel),
+    submitBP(datesToSubmit, dateLabel),
+    submitMeals(datesToSubmit, dateLabel),
+    submitExercise(datesToSubmit, dateLabel),
+  ]);
 
-  // 血圧（全日付を1ファイルにまとめて書き込み）
-  try {
-    const { content, sha } = await ghGet('logs/daily/blood_pressure.csv');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      if (parseBP(d.amBp1) || d.cpap) {
-        const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
-        if (next) { cur = next; changed = true; }
-      }
-      if (parseBP(d.pmBp1)) {
-        const next = upsertBP(cur, date, 'night', d.pmBp1, d.pmBp2, '');
-        if (next) { cur = next; changed = true; }
-      }
-    }
-    if (changed) {
-      await ghPut('logs/daily/blood_pressure.csv', cur, sha, `Update BP for ${dateLabel}`);
-      updated.push('血圧');
-    } else {
-      unchanged.push('血圧');
-    }
-  } catch (e) {
-    errors.push(`血圧: ${e.message}`);
-  }
-
-  // 食事（全日付を1ファイルにまとめて書き込み）
-  try {
-    const { content, sha } = await ghGet('logs/lifestyle/meals.md');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      const next = upsertMdSection(cur, date, buildMealsSection(date, {
-        breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
-        note: d.foodNote, eatingOut: d.eatingOut,
-        nightSnack: d.nightSnack, snack: d.snack,
-      }));
-      if (next) { cur = next; changed = true; }
-    }
-    if (changed) {
-      await ghPut('logs/lifestyle/meals.md', cur, sha, `Update 食事 for ${dateLabel}`);
-      updated.push('食事');
-    } else {
-      unchanged.push('食事');
-    }
-  } catch (e) {
-    errors.push(`食事: ${e.message}`);
-  }
-
-  // 運動（全日付を1ファイルにまとめて書き込み）
-  try {
-    const { content, sha } = await ghGet('logs/lifestyle/exercise.md');
-    let cur = content, changed = false;
-    for (const date of datesToSubmit) {
-      const d = drafts[date];
-      const next = upsertMdSection(cur, date, buildExerciseSection(date, d.exercise));
-      if (next) { cur = next; changed = true; }
-    }
-    if (changed) {
-      await ghPut('logs/lifestyle/exercise.md', cur, sha, `Update 運動 for ${dateLabel}`);
-      updated.push('運動');
-    } else {
-      unchanged.push('運動');
-    }
-  } catch (e) {
-    errors.push(`運動: ${e.message}`);
+  const updated = [], unchanged = [], errors = [];
+  for (const r of results) {
+    if (r.status === 'updated') updated.push(r.label);
+    else if (r.status === 'unchanged') unchanged.push(r.label);
+    else errors.push(`${r.label}: ${r.message}`);
   }
 
   setLoading(false);
@@ -495,6 +530,7 @@ async function submit() {
 
 function clearForm() {
   Object.keys(drafts).forEach(k => delete drafts[k]);
+  persistDrafts();
   chartRawData = null;
   ['am-bp1','am-bp2','pm-bp1','pm-bp2','weight','bodyfat',
    'eating-out','breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
@@ -792,6 +828,7 @@ function switchTab(tab) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  restoreDrafts();
   currentDate = todayLocal();
   $('date').value = currentDate;
 

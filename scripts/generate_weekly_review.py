@@ -16,6 +16,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 import pandas as pd
 
+from goals import GOALS
+
 ROOT         = Path(__file__).resolve().parents[1]
 WEIGHT_CSV   = ROOT / "logs" / "daily" / "weight.csv"
 BP_CSV       = ROOT / "logs" / "daily" / "blood_pressure.csv"
@@ -27,14 +29,6 @@ CURRENT_FILE = REVIEWS_DIR / "weekly_review.md"
 
 JST = timezone(timedelta(hours=9))
 FORCE = "--force" in sys.argv
-
-GOALS = [
-    (88.9, "第1目標"),
-    (82.9, "第2目標"),
-    (79.9, "第3目標"),
-    (69.9, "第4目標"),
-    (62.1, "最終目標"),
-]
 
 
 # ---------------------------------------------------------------------------
