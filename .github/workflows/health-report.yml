@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: main-push
+  group: health-report-push
   cancel-in-progress: false
 
 jobs:
@@ -42,6 +42,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add README.md reports/health_analysis.md reports/blood_pressure.png reports/weight.png
-          git commit -m "Update health report [skip ci]" || echo "No changes to commit"
-          git pull --rebase origin main
-          git push
+          if git commit -m "Update health report [skip ci]"; then
+            n=0
+            until git push; do
+              n=$((n+1))
+              if [ "$n" -ge 5 ]; then echo "push failed after $n attempts"; exit 1; fi
+              sleep $((n*3))
+              git pull --rebase origin main
+            done
+          else
+            echo "No changes to commit"
+          fi

@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: main-push
+  group: weekly-review-push
   cancel-in-progress: false
 
 jobs:
@@ -51,6 +51,11 @@ jobs:
           git add logs/reviews/
           if ! git diff --cached --quiet; then
             git commit -m "Add weekly review [skip ci]"
-            git pull --rebase origin main
-            git push
+            n=0
+            until git push; do
+              n=$((n+1))
+              if [ "$n" -ge 5 ]; then echo "push failed after $n attempts"; exit 1; fi
+              sleep $((n*3))
+              git pull --rebase origin main
+            done
           fi
