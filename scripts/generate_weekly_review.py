@@ -343,7 +343,10 @@ def build_analysis(
         off_df = bp_morning[bp_morning["memo"].str.contains("cpap:off", na=False)]
         if not off_df.empty and not on_df.empty:
             diff_cpap = off_df["systolic"].mean() - on_df["systolic"].mean()
-            lines.append(f"CPAP未着用時の朝収縮期は着用時より平均 {diff_cpap:+.1f} mmHg 高い。着用継続が最優先。")
+            if diff_cpap > 0:
+                lines.append(f"CPAP未着用時の朝収縮期は着用時より平均 {diff_cpap:+.1f} mmHg 高い。着用継続が最優先。")
+            else:
+                lines.append(f"CPAP未着用時の朝収縮期は着用時と比べて大きな差はなかった（{diff_cpap:+.1f} mmHg）。")
 
     # 脈拍異常（複数日継続時のみ分析コメントを追加）
     all_bp = pd.concat([bp_morning, bp_night]) if not (bp_morning.empty and bp_night.empty) else pd.DataFrame()
