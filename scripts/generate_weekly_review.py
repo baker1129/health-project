@@ -4,6 +4,8 @@
 - logs/reviews/weekly_review.md を次週テンプレートに差し替え
 """
 
+from __future__ import annotations
+
 import re
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -170,6 +172,14 @@ def load_meals(start: date, end: date) -> dict:
     }
 
 
+def load_prev_week_avg(week_start: date) -> float | None:
+    """直前7日間（前週）の体重平均。データがなければNone。"""
+    prev_start = week_start - timedelta(days=7)
+    prev_end   = week_start - timedelta(days=1)
+    prev_df = load_weight(prev_start, prev_end)
+    return prev_df["weight"].mean() if not prev_df.empty else None
+
+
 def load_exercise(start: date, end: date) -> list[str]:
     if not EXERCISE_MD.exists():
         return []
@@ -206,16 +216,15 @@ def bp_judge(sys_val: float, dia_val: float) -> str:
 # 各セクション生成
 # ---------------------------------------------------------------------------
 
-def build_weight_section(w_df: pd.DataFrame) -> str:
+def build_weight_section(w_df: pd.DataFrame, w_diff: float | None) -> str:
     if w_df.empty:
         return "- データなし"
-    w_start = w_df.iloc[0]["weight"]
-    w_end   = w_df.iloc[-1]["weight"]
-    w_avg   = w_df["weight"].mean()
-    w_diff  = w_end - w_start
+    w_end = w_df.iloc[-1]["weight"]
+    w_avg = w_df["weight"].mean()
+    diff_text = f"（前週平均比 {w_diff:+.1f} kg）" if w_diff is not None else "（前週データなし）"
     lines = [
-        f"- 開始: {w_start:.1f} kg　→　最新: {w_end:.1f} kg　（**{w_diff:+.1f} kg**）",
-        f"- 週平均: **{w_avg:.1f} kg**",
+        f"- 週平均: **{w_avg:.1f} kg**{diff_text}",
+        f"- 直近の記録: {w_end:.1f} kg（{len(w_df)}日記録）",
     ]
     if not w_df["bodyfat"].isna().all():
         bf_vals = w_df["bodyfat"].dropna()
@@ -295,22 +304,24 @@ def build_analysis(
     bp_night: pd.DataFrame,
     meals: dict,
     exercise: list[str],
+    w_diff: float | None,
 ) -> str:
     lines = []
 
-    # 体重
-    if not w_df.empty and len(w_df) > 1:
-        diff      = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
+    # 体重（週平均を前週平均と比較。日々の増減ではなく週単位のトレンドで判断する）
+    if not w_df.empty:
         avg       = w_df["weight"].mean()
         w_end_val = w_df.iloc[-1]["weight"]
-        if diff < -1:
-            lines.append(f"体重は週で {abs(diff):.1f} kg 減少（週平均 {avg:.1f} kg）。食事コントロールが機能している。")
-        elif diff < 0:
-            lines.append(f"体重はわずかに減少（{diff:+.1f} kg、週平均 {avg:.1f} kg）。方向は正しい。")
-        elif diff <= 0.5:
-            lines.append(f"体重はほぼ横ばい（{diff:+.1f} kg、週平均 {avg:.1f} kg）。停滞期の可能性。運動量を増やすタイミング。")
+        if w_diff is None:
+            lines.append(f"週平均 {avg:.1f} kg（前週データがないためトレンド比較は次週以降）。")
+        elif w_diff < -1:
+            lines.append(f"体重は前週平均より {abs(w_diff):.1f} kg 減少（週平均 {avg:.1f} kg）。食事コントロールが機能している。")
+        elif w_diff < 0:
+            lines.append(f"体重はわずかに減少（前週比 {w_diff:+.1f} kg、週平均 {avg:.1f} kg）。方向は正しい。")
+        elif w_diff <= 0.5:
+            lines.append(f"体重はほぼ横ばい（前週比 {w_diff:+.1f} kg、週平均 {avg:.1f} kg）。停滞期の可能性。運動量を増やすタイミング。")
         else:
-            lines.append(f"体重が {diff:+.1f} kg 増加（週平均 {avg:.1f} kg）。食事・運動を見直したい。")
+            lines.append(f"体重が前週比 {w_diff:+.1f} kg 増加（週平均 {avg:.1f} kg）。食事・運動を見直したい。")
         if w_end_val <= GOALS[0][0]:
             lines.append(f"✅ {GOALS[0][1]}（{GOALS[0][0]} kg）を達成。次は{GOALS[1][1]}（{GOALS[1][0]} kg）に向けて継続。")
 
@@ -380,6 +391,7 @@ def build_good_points(
     bp_morning: pd.DataFrame,
     meals: dict,
     exercise: list[str],
+    w_diff: float | None,
 ) -> str:
     points = []
     w_end = w_df.iloc[-1]["weight"] if not w_df.empty else None
@@ -392,12 +404,11 @@ def build_good_points(
     if len(w_df) >= 5:
         points.append(f"体重を {len(w_df)} 日記録（目標5日以上達成）")
 
-    if len(w_df) >= 2:
-        diff = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
-        if diff < -1.0:
-            points.append(f"週で {abs(diff):.1f} kg 減少")
-        elif diff < 0:
-            points.append("体重がわずかに減少（方向は正しい）")
+    if w_diff is not None:
+        if w_diff < -1.0:
+            points.append(f"週平均が前週より {abs(w_diff):.1f} kg 減少")
+        elif w_diff < 0:
+            points.append("週平均が前週よりわずかに減少（方向は正しい）")
 
     if not bp_morning.empty:
         avg_sys = bp_morning["systolic"].mean()
@@ -430,6 +441,7 @@ def build_bad_points(
     meals: dict,
     exercise: list[str],
     record_days: int,
+    w_diff: float | None,
 ) -> str:
     points = []
     w_end = w_df.iloc[-1]["weight"] if not w_df.empty else None
@@ -437,10 +449,8 @@ def build_bad_points(
     if len(w_df) < 5:
         points.append(f"体重記録 {len(w_df)} 日（目標5日以上に未達）")
 
-    if len(w_df) >= 2:
-        diff = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
-        if diff > 0.5:
-            points.append(f"体重 {diff:+.1f} kg 増加")
+    if w_diff is not None and w_diff > 0.5:
+        points.append(f"週平均が前週より {w_diff:+.1f} kg 増加")
 
     if not bp_morning.empty:
         avg_sys = bp_morning["systolic"].mean()
@@ -478,6 +488,7 @@ def build_next_strategy(
     bp_morning: pd.DataFrame,
     meals: dict,
     exercise: list[str],
+    w_diff: float | None,
 ) -> str:
     strategies = []
     w_end = w_df.iloc[-1]["weight"] if not w_df.empty else None
@@ -490,11 +501,10 @@ def build_next_strategy(
                     strategies.append(f"**{label}まであと {remaining:.1f} kg** — このペースで達成を")
                 break
 
-        if len(w_df) >= 2:
-            diff = w_df.iloc[-1]["weight"] - w_df.iloc[0]["weight"]
-            if diff > 0.5:
+        if w_diff is not None:
+            if w_diff > 0.5:
                 strategies.append("食事量・夜間の間食を見直す")
-            elif abs(diff) <= 0.2 and len(exercise) < 3:
+            elif abs(w_diff) <= 0.2 and len(exercise) < 3:
                 strategies.append("停滞気味のため運動量を増やす（10分でもOK）")
 
     ex_days   = len(exercise)
@@ -533,14 +543,17 @@ def build_review(week_num: int, start: date, end: date) -> str:
     exercise  = load_exercise(start, end)
     record_days = (end - start).days + 1
 
-    weight_sec   = build_weight_section(w_df)
+    prev_avg = load_prev_week_avg(start)
+    w_diff   = (w_df["weight"].mean() - prev_avg) if (not w_df.empty and prev_avg is not None) else None
+
+    weight_sec   = build_weight_section(w_df, w_diff)
     bp_sec       = build_bp_section(bp_morning, bp_night)
     meals_sec    = build_meals_section(meals, record_days)
     exercise_sec = build_exercise_section(exercise)
-    analysis_sec = build_analysis(w_df, bp_morning, bp_night, meals, exercise)
-    good_sec     = build_good_points(w_df, bp_morning, meals, exercise)
-    bad_sec      = build_bad_points(w_df, bp_morning, meals, exercise, record_days)
-    strategy_sec = build_next_strategy(w_df, bp_morning, meals, exercise)
+    analysis_sec = build_analysis(w_df, bp_morning, bp_night, meals, exercise, w_diff)
+    good_sec     = build_good_points(w_df, bp_morning, meals, exercise, w_diff)
+    bad_sec      = build_bad_points(w_df, bp_morning, meals, exercise, record_days, w_diff)
+    strategy_sec = build_next_strategy(w_df, bp_morning, meals, exercise, w_diff)
 
     w_end_val    = w_df.iloc[-1]["weight"] if not w_df.empty else 999.0
     walk_days    = _walk_goal_days(w_end_val)
