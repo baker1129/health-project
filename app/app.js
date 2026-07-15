@@ -22,6 +22,16 @@ let currentDate = '';
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
+function getRadio(name) {
+  return document.querySelector(`input[name="${name}"]:checked`)?.value || '';
+}
+
+function setRadio(name, value) {
+  const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
+  document.querySelectorAll(`input[name="${name}"]`).forEach(r => (r.checked = false));
+  if (el) el.checked = true;
+}
+
 function showMsg(text, type = 'info') {
   const el = $('msg');
   el.textContent = text;
@@ -67,11 +77,12 @@ function saveDraft(date) {
     bodyfat:    $('bodyfat').value,
     amBp1:      $('am-bp1').value,
     amBp2:      $('am-bp2').value,
-    cpap:       document.querySelector('input[name="cpap"]:checked')?.value || '',
+    cpap:       getRadio('cpap'),
     pmBp1:      $('pm-bp1').value,
     pmBp2:      $('pm-bp2').value,
     eatingOut:  $('eating-out').value,
-    snackCount: $('snack-count').value,
+    nightSnack: getRadio('night-snack'),
+    snack:      getRadio('snack'),
     breakfast:  $('breakfast').value,
     lunch:      $('lunch').value,
     dinner:     $('dinner').value,
@@ -82,7 +93,7 @@ function saveDraft(date) {
     draft.weight || draft.bodyfat ||
     draft.amBp1 || draft.amBp2 || draft.cpap ||
     draft.pmBp1 || draft.pmBp2 ||
-    draft.eatingOut !== '' || draft.snackCount !== '' ||
+    draft.eatingOut !== '' || draft.nightSnack || draft.snack ||
     draft.breakfast || draft.lunch || draft.dinner ||
     draft.foodNote || draft.exercise
   );
@@ -98,11 +109,12 @@ function applyDraft(draft) {
   $('bodyfat').value     = draft.bodyfat;
   $('am-bp1').value      = draft.amBp1;
   $('am-bp2').value      = draft.amBp2;
-  document.querySelector(`input[name="cpap"][value="${draft.cpap}"]`).checked = true;
+  setRadio('cpap', draft.cpap);
   $('pm-bp1').value      = draft.pmBp1;
   $('pm-bp2').value      = draft.pmBp2;
   $('eating-out').value  = draft.eatingOut;
-  $('snack-count').value = draft.snackCount;
+  setRadio('night-snack', draft.nightSnack);
+  setRadio('snack', draft.snack);
   $('breakfast').value   = draft.breakfast;
   $('lunch').value       = draft.lunch;
   $('dinner').value      = draft.dinner;
@@ -189,13 +201,13 @@ function toList(text) {
   );
 }
 
-function buildMealsSection(date, { breakfast, lunch, dinner, note, eatingOut, snackCount }) {
-  const hasEatingOut  = eatingOut  !== '' && eatingOut  != null;
-  const hasSnackCount = snackCount !== '' && snackCount != null;
-  if (!breakfast && !lunch && !dinner && !note && !hasEatingOut && !hasSnackCount) return null;
+function buildMealsSection(date, { breakfast, lunch, dinner, note, eatingOut, nightSnack, snack }) {
+  const hasEatingOut = eatingOut !== '' && eatingOut != null;
+  if (!breakfast && !lunch && !dinner && !note && !hasEatingOut && !nightSnack && !snack) return null;
   let s = `## ${date}\n`;
-  if (hasEatingOut)  s += `外食: ${eatingOut}回\n`;
-  if (hasSnackCount) s += `夜食・間食: ${snackCount}回\n`;
+  if (hasEatingOut) s += `外食: ${eatingOut}回\n`;
+  if (nightSnack)   s += `夜食: ${nightSnack}\n`;
+  if (snack)        s += `間食: ${snack}\n`;
   if (breakfast) s += `\n### 朝\n${toList(breakfast)}`;
   if (lunch)     s += `\n### 昼\n${toList(lunch)}`;
   if (dinner)    s += `\n### 夜\n${toList(dinner)}`;
@@ -272,6 +284,11 @@ function extractCount(section, key) {
   return m ? m[1] : '';
 }
 
+function extractYesNo(section, key) {
+  const m = section.match(new RegExp('^' + key + ': (あり|なし)', 'm'));
+  return m ? m[1] : '';
+}
+
 function extractSubsection(section, heading) {
   const idx = section.indexOf(`### ${heading}`);
   if (idx === -1) return '';
@@ -317,15 +334,16 @@ async function loadForDate(date) {
     const am = parseBPRow(bpFile.content, date, 'morning');
     $('am-bp1').value = am?.bp1 || '';
     $('am-bp2').value = am?.bp2 || '';
-    document.querySelector(`input[name="cpap"][value="${am?.cpap || ''}"]`).checked = true;
+    setRadio('cpap', am?.cpap || '');
 
     const pm = parseBPRow(bpFile.content, date, 'night');
     $('pm-bp1').value = pm?.bp1 || '';
     $('pm-bp2').value = pm?.bp2 || '';
 
     const mealsSection = parseDateSection(mealsFile.content, date);
-    $('eating-out').value  = mealsSection ? extractCount(mealsSection, '外食')       : '';
-    $('snack-count').value = mealsSection ? extractCount(mealsSection, '夜食・間食') : '';
+    $('eating-out').value  = mealsSection ? extractCount(mealsSection, '外食') : '';
+    setRadio('night-snack', mealsSection ? extractYesNo(mealsSection, '夜食') : '');
+    setRadio('snack',       mealsSection ? extractYesNo(mealsSection, '間食') : '');
     $('breakfast').value   = mealsSection ? extractSubsection(mealsSection, '朝')    : '';
     $('lunch').value       = mealsSection ? extractSubsection(mealsSection, '昼')    : '';
     $('dinner').value      = mealsSection ? extractSubsection(mealsSection, '夜')    : '';
@@ -428,7 +446,8 @@ async function submit() {
       const d = drafts[date];
       const next = upsertMdSection(cur, date, buildMealsSection(date, {
         breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
-        note: d.foodNote, eatingOut: d.eatingOut, snackCount: d.snackCount,
+        note: d.foodNote, eatingOut: d.eatingOut,
+        nightSnack: d.nightSnack, snack: d.snack,
       }));
       if (next) { cur = next; changed = true; }
     }
@@ -478,10 +497,12 @@ function clearForm() {
   Object.keys(drafts).forEach(k => delete drafts[k]);
   chartRawData = null;
   ['am-bp1','am-bp2','pm-bp1','pm-bp2','weight','bodyfat',
-   'eating-out','snack-count','breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
+   'eating-out','breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
     $(id).value = '';
   });
-  document.querySelector('input[name="cpap"][value=""]').checked = true;
+  setRadio('cpap', '');
+  setRadio('night-snack', '');
+  setRadio('snack', '');
   currentDate = todayLocal();
   $('date').value = currentDate;
   loadForDate(currentDate);

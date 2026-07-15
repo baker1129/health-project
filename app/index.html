@@ -85,10 +85,20 @@
         <span class="field-label">外食 <span class="unit">回</span></span>
         <input type="number" id="eating-out" min="0" max="3" step="1" placeholder="0" inputmode="numeric">
       </label>
-      <label class="field">
-        <span class="field-label">夜食・間食 <span class="unit">回</span></span>
-        <input type="number" id="snack-count" min="0" step="1" placeholder="0" inputmode="numeric">
-      </label>
+      <div class="field">
+        <span class="field-label">夜食</span>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="night-snack" value="あり"> あり</label>
+          <label class="radio-label"><input type="radio" name="night-snack" value="なし"> なし</label>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label">間食</span>
+        <div class="radio-group">
+          <label class="radio-label"><input type="radio" name="snack" value="あり"> あり</label>
+          <label class="radio-label"><input type="radio" name="snack" value="なし"> なし</label>
+        </div>
+      </div>
       <label class="field">
         <span class="field-label">朝食</span>
         <input type="text" id="breakfast" placeholder="なし">

@@ -139,10 +139,10 @@ def load_bp(start: date, end: date) -> pd.DataFrame:
 
 def load_meals(start: date, end: date) -> dict:
     if not MEALS_MD.exists():
-        return {"eating_out": 0, "snack": 0, "no_breakfast_days": 0}
+        return {"eating_out": 0, "night_snack_days": 0, "snack_days": 0, "no_breakfast_days": 0}
     text = MEALS_MD.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     sections = re.split(r"\n(?=## \d{4}-\d{2}-\d{2})", text)
-    eating_out, snack, no_breakfast = 0, 0, 0
+    eating_out, night_snack_days, snack_days, no_breakfast = 0, 0, 0, 0
     for section in sections:
         dm = re.match(r"## (\d{4}-\d{2}-\d{2})", section)
         if not dm:
@@ -151,15 +151,23 @@ def load_meals(start: date, end: date) -> dict:
         if not (start <= d <= end):
             continue
         eo = re.search(r"^外食: (\d+)回", section, re.MULTILINE)
-        sn = re.search(r"^夜食・間食: (\d+)回", section, re.MULTILINE)
+        ns = re.search(r"^夜食: (あり|なし)", section, re.MULTILINE)
+        sn = re.search(r"^間食: (あり|なし)", section, re.MULTILINE)
         bf = re.search(r"### 朝\n- なし", section)
         if eo:
             eating_out += int(eo.group(1))
-        if sn:
-            snack += int(sn.group(1))
+        if ns and ns.group(1) == "あり":
+            night_snack_days += 1
+        if sn and sn.group(1) == "あり":
+            snack_days += 1
         if bf:
             no_breakfast += 1
-    return {"eating_out": eating_out, "snack": snack, "no_breakfast_days": no_breakfast}
+    return {
+        "eating_out": eating_out,
+        "night_snack_days": night_snack_days,
+        "snack_days": snack_days,
+        "no_breakfast_days": no_breakfast,
+    }
 
 
 def load_exercise(start: date, end: date) -> list[str]:
@@ -267,7 +275,8 @@ def build_bp_section(bp_morning: pd.DataFrame, bp_night: pd.DataFrame) -> str:
 def build_meals_section(meals: dict, record_days: int) -> str:
     lines = [
         f"- 外食: **{meals['eating_out']}回**",
-        f"- 夜食・間食: **{meals['snack']}回**",
+        f"- 夜食: **{meals['night_snack_days']}日**",
+        f"- 間食: **{meals['snack_days']}日**",
     ]
     if record_days > 0:
         lines.append(f"- 朝食なし: {record_days}日中{meals['no_breakfast_days']}日")
@@ -335,9 +344,11 @@ def build_analysis(
                 lines.append(f"{row['date']} {row['time']} の脈拍 {row['pulse']:.0f} bpm は頻脈。飲酒・ストレス等との関連を確認。")
 
     # 食事
-    if meals["snack"] >= 3:
-        lines.append(f"夜食・間食が {meals['snack']} 回と多め。就寝前の空腹感への対策を検討。")
-    elif meals["snack"] == 0:
+    if meals["night_snack_days"] >= 1:
+        lines.append(f"夜食が {meals['night_snack_days']} 日あった。就寝前の空腹感への対策を検討。")
+    if meals["snack_days"] >= 3:
+        lines.append(f"間食が {meals['snack_days']} 日と多め。")
+    if meals["night_snack_days"] == 0 and meals["snack_days"] == 0:
         lines.append("夜食・間食なし。良好な食習慣が維持できている。")
 
     if meals["no_breakfast_days"] >= 4:
@@ -400,7 +411,7 @@ def build_good_points(
         if off_count == 0 and on_count > 0:
             points.append(f"CPAP {on_count} 日着用（完全着用）")
 
-    if meals["snack"] == 0:
+    if meals["night_snack_days"] == 0 and meals["snack_days"] == 0:
         points.append("夜食・間食なし")
 
     ex_days   = len(exercise)
@@ -444,8 +455,10 @@ def build_bad_points(
         if off_count >= 1:
             points.append(f"CPAP未着用 {off_count} 日")
 
-    if meals["snack"] >= 1:
-        points.append(f"夜食・間食 {meals['snack']} 回")
+    if meals["night_snack_days"] >= 1:
+        points.append(f"夜食 {meals['night_snack_days']} 日")
+    if meals["snack_days"] >= 1:
+        points.append(f"間食 {meals['snack_days']} 日")
 
     if meals["no_breakfast_days"] >= 3:
         points.append(f"朝食なし {meals['no_breakfast_days']} 日（多め）")
@@ -496,7 +509,7 @@ def build_next_strategy(
     if meals["no_breakfast_days"] >= 3:
         strategies.append("プロテイン・ナッツなど簡単なもので朝食を習慣化する")
 
-    if meals["snack"] >= 2:
+    if meals["night_snack_days"] >= 1:
         strategies.append("就寝2時間前以降は食べない")
 
     if not bp_morning.empty:

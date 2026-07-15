@@ -388,12 +388,14 @@ def analyze_meals() -> dict[str, str]:
         if not date_m:
             continue
         date = datetime.strptime(date_m.group(1), "%Y-%m-%d").date()
-        eo_m  = re.search(r'^外食: (\d+)回',      section, re.MULTILINE)
-        sn_m  = re.search(r'^夜食・間食: (\d+)回', section, re.MULTILINE)
+        eo_m = re.search(r'^外食: (\d+)回',       section, re.MULTILINE)
+        ns_m = re.search(r'^夜食: (あり|なし)',    section, re.MULTILINE)
+        sn_m = re.search(r'^間食: (あり|なし)',    section, re.MULTILINE)
         records.append({
-            "date":       date,
-            "eating_out": int(eo_m.group(1))  if eo_m  else None,
-            "snack":      int(sn_m.group(1))  if sn_m  else None,
+            "date":         date,
+            "eating_out":   int(eo_m.group(1)) if eo_m else None,
+            "night_snack":  (ns_m.group(1) == "あり") if ns_m else None,
+            "snack":        (sn_m.group(1) == "あり") if sn_m else None,
         })
 
     if not records:
@@ -403,13 +405,15 @@ def analyze_meals() -> dict[str, str]:
     week_start  = latest_date - __import__("datetime").timedelta(days=6)
     week = [r for r in records if r["date"] >= week_start]
 
-    eo_total  = sum(r["eating_out"] for r in week if r["eating_out"] is not None)
-    sn_total  = sum(r["snack"]      for r in week if r["snack"]      is not None)
-    eo_days   = sum(1 for r in week if r["eating_out"] is not None)
-    sn_days   = sum(1 for r in week if r["snack"]      is not None)
+    eo_total   = sum(r["eating_out"] for r in week if r["eating_out"] is not None)
+    ns_days    = sum(1 for r in week if r["night_snack"])
+    sn_days    = sum(1 for r in week if r["snack"])
+    eo_days    = sum(1 for r in week if r["eating_out"] is not None)
+    rec_days   = sum(1 for r in week if r["night_snack"] is not None or r["snack"] is not None)
+    days_total = max(eo_days, rec_days)
 
-    summary_md = f"外食 {eo_total}回 / 夜食・間食 {sn_total}回（直近7日・記録{max(eo_days, sn_days)}日分）"
-    console    = f"外食: {eo_total}回、夜食・間食: {sn_total}回（直近7日・記録{max(eo_days, sn_days)}日分）"
+    summary_md = f"外食 {eo_total}回 / 夜食 {ns_days}日・間食 {sn_days}日（直近7日・記録{days_total}日分）"
+    console    = f"外食: {eo_total}回、夜食: {ns_days}日、間食: {sn_days}日（直近7日・記録{days_total}日分）"
     return {"weekly_summary": summary_md, "console": console}
 
 
