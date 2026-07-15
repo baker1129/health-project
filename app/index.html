@@ -19,6 +19,7 @@
   <nav class="tab-bar">
     <button id="tab-input" class="tab-btn tab-active">入力</button>
     <button id="tab-chart" class="tab-btn">グラフ</button>
+    <button id="tab-report" class="tab-btn">レポート</button>
   </nav>
 
   <!-- 入力タブ -->
@@ -156,6 +157,32 @@
       </div>
     </div>
 
+    <div class="bottom-space"></div>
+  </div>
+
+  <!-- レポートタブ -->
+  <div id="report-view" class="hidden">
+    <section class="card">
+      <h2 class="section-title">週次レビュー（手動生成）</h2>
+      <p class="hint-text">通常は水曜夜の血圧記録で自動生成されます。入れ忘れた場合はここから今週分を生成できます。</p>
+      <button id="weekly-report-btn" class="submit-btn">今週の週次レビューを生成</button>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">カスタム期間レポート</h2>
+      <p class="hint-text">任意の期間の集計レポートを作成します（週次レビューとは別に保存され、週次サイクルには影響しません）。</p>
+      <label class="field">
+        <span class="field-label">開始日</span>
+        <input type="date" id="custom-start">
+      </label>
+      <label class="field">
+        <span class="field-label">終了日</span>
+        <input type="date" id="custom-end">
+      </label>
+      <button id="custom-report-btn" class="submit-btn">カスタムレポートを生成</button>
+    </section>
+
+    <div id="report-msg" class="msg hidden"></div>
     <div class="bottom-space"></div>
   </div>
 

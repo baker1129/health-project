@@ -1,0 +1,56 @@
+name: Custom Period Review Generator
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: '開始日 (YYYY-MM-DD)'
+        required: true
+        type: string
+      end:
+        description: '終了日 (YYYY-MM-DD)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: custom-review-push
+  cancel-in-progress: false
+
+jobs:
+  custom-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install pandas
+
+      - name: Generate custom review
+        env:
+          TZ: Asia/Tokyo
+        run: |
+          python scripts/generate_custom_review.py --start "${{ inputs.start }}" --end "${{ inputs.end }}"
+
+      - name: Commit custom review
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add logs/reviews/custom/
+          if ! git diff --cached --quiet; then
+            git commit -m "Add custom review ${{ inputs.start }} to ${{ inputs.end }} [skip ci]"
+            n=0
+            until git push; do
+              n=$((n+1))
+              if [ "$n" -ge 5 ]; then echo "push failed after $n attempts"; exit 1; fi
+              sleep $((n*3))
+              git pull --rebase origin main
+            done
+          fi

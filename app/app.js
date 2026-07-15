@@ -805,25 +805,94 @@ async function loadAndRenderCharts(forceRefresh = false) {
   drawBPChart(chartRawData.bp, chartPeriodDays);
 }
 
+// ── Report generation（GitHub Actions workflow_dispatch）───────────────────────
+function showReportMsg(text, type = 'info') {
+  const el = $('report-msg');
+  el.textContent = text;
+  el.className = `msg ${type}`;
+  if (type === 'success') setTimeout(() => { el.className = 'msg hidden'; }, 8000);
+}
+
+async function ghDispatchWorkflow(workflowFile, inputs) {
+  const r = await fetch(
+    `${API}/repos/${cfg.owner}/${cfg.repo}/actions/workflows/${workflowFile}/dispatches`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `token ${cfg.token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ref: cfg.branch, inputs }),
+    }
+  );
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.message || String(r.status));
+  }
+}
+
+async function triggerWeeklyReport() {
+  if (!cfg.token) {
+    showReportMsg('⚙️ 設定から GitHub Token を入力してください', 'error');
+    openSettings();
+    return;
+  }
+  if (!confirm('今週分の週次レビューを生成しますか？（既存の内容があれば上書きされます）')) return;
+
+  const btn = $('weekly-report-btn');
+  btn.disabled = true;
+  showReportMsg('生成をリクエスト中...', 'info');
+  try {
+    await ghDispatchWorkflow('weekly-review.yml', { force: 'true' });
+    showReportMsg('✅ リクエストしました。数十秒〜数分でGitHubに反映されます（Actionsタブで進捗確認可）', 'success');
+  } catch (e) {
+    showReportMsg(`❌ エラー: ${e.message}`, 'error');
+  }
+  btn.disabled = false;
+}
+
+async function triggerCustomReport() {
+  if (!cfg.token) {
+    showReportMsg('⚙️ 設定から GitHub Token を入力してください', 'error');
+    openSettings();
+    return;
+  }
+  const start = $('custom-start').value;
+  const end   = $('custom-end').value;
+  if (!start || !end) {
+    showReportMsg('開始日・終了日を入力してください', 'error');
+    return;
+  }
+  if (start > end) {
+    showReportMsg('開始日は終了日より前にしてください', 'error');
+    return;
+  }
+  if (!confirm(`${start} 〜 ${end} のカスタムレポートを生成しますか？`)) return;
+
+  const btn = $('custom-report-btn');
+  btn.disabled = true;
+  showReportMsg('生成をリクエスト中...', 'info');
+  try {
+    await ghDispatchWorkflow('custom-review.yml', { start, end });
+    showReportMsg('✅ リクエストしました。数十秒〜数分でGitHubに反映されます（logs/reviews/custom/ に保存されます）', 'success');
+  } catch (e) {
+    showReportMsg(`❌ エラー: ${e.message}`, 'error');
+  }
+  btn.disabled = false;
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(tab) {
-  const inputView = $('input-view');
-  const chartView = $('chart-view');
-  const tabInput  = $('tab-input');
-  const tabChart  = $('tab-chart');
+  const views = { input: $('input-view'), chart: $('chart-view'), report: $('report-view') };
+  const tabs  = { input: $('tab-input'),  chart: $('tab-chart'),  report: $('tab-report') };
 
-  if (tab === 'chart') {
-    inputView.classList.add('hidden');
-    chartView.classList.remove('hidden');
-    tabInput.classList.remove('tab-active');
-    tabChart.classList.add('tab-active');
-    loadAndRenderCharts();
-  } else {
-    chartView.classList.add('hidden');
-    inputView.classList.remove('hidden');
-    tabChart.classList.remove('tab-active');
-    tabInput.classList.add('tab-active');
-  }
+  Object.keys(views).forEach(key => {
+    views[key].classList.toggle('hidden', key !== tab);
+    tabs[key].classList.toggle('tab-active', key === tab);
+  });
+
+  if (tab === 'chart') loadAndRenderCharts();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -846,6 +915,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   $('tab-input').addEventListener('click', () => switchTab('input'));
   $('tab-chart').addEventListener('click', () => switchTab('chart'));
+  $('tab-report').addEventListener('click', () => switchTab('report'));
+
+  $('weekly-report-btn').addEventListener('click', triggerWeeklyReport);
+  $('custom-report-btn').addEventListener('click', triggerCustomReport);
 
   document.querySelectorAll('.period-btn').forEach(btn => {
     btn.addEventListener('click', () => {

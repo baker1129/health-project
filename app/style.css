@@ -1,5 +1,8 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Utility ── */
+.hidden { display: none; }
+
 :root {
   --bg:      #f2f2f7;
   --card:    #ffffff;

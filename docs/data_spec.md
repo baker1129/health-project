@@ -25,13 +25,15 @@ health-project/
 │   │   └── exercise.md          # 運動記録
 │   └── reviews/
 │       ├── weekly_review.md     # 最新週次振り返り
-│       └── archive/weekly/      # 過去の週次レビュー
+│       ├── archive/weekly/      # 過去の週次レビュー
+│       └── custom/              # 任意期間のカスタムレポート（週次サイクルとは無関係）
 ├── scripts/
 │   ├── goals.py                 # 体重の段階目標（GOALS）定義。他スクリプトの共有元
 │   ├── analyze_health.py        # メイン分析（血圧リスク・相関・パターン検出）
 │   ├── plot_weight.py           # 体重グラフ生成
 │   ├── plot_blood_pressure.py   # 血圧グラフ生成
 │   ├── generate_weekly_review.py # 週次レビュー自動生成
+│   ├── generate_custom_review.py # 任意期間のカスタムレポート生成
 │   └── update_readme.py         # README自動更新
 ├── reports/
 │   ├── health_analysis.md       # 自動生成：分析サマリー
@@ -39,7 +41,8 @@ health-project/
 │   └── blood_pressure.png       # 自動生成：血圧グラフ
 ├── .github/workflows/
 │   ├── health-report.yml        # push時に自動レポート生成
-│   └── weekly-review.yml        # 水曜夜血圧push時に週次レビュー生成
+│   ├── weekly-review.yml        # 水曜夜血圧push時に週次レビュー生成
+│   └── custom-review.yml        # 任意期間のカスタムレポート生成（手動実行のみ）
 ├── requirements.txt
 └── CLAUDE.md
 ```
@@ -98,7 +101,13 @@ YYYY-MM-DD,morning/night,XXX,XX,XX,XXX,XX,XX,メモ
 ### weekly-review.yml
 `logs/daily/blood_pressure.csv` への push 時（水曜夜血圧を検知）に自動実行：
 - `generate_weekly_review.py` → `logs/reviews/weekly_review.md`
-- `--force` オプションで強制実行も可能（workflow_dispatch）
+- `--force` オプションで強制実行も可能（workflow_dispatch）。アプリの「レポート」タブ→「今週の週次レビューを生成」からも実行できる
+
+### custom-review.yml
+手動実行専用（`workflow_dispatch`、開始日・終了日を入力）：
+- `generate_custom_review.py --start ... --end ...` → `logs/reviews/custom/review_{開始日}_to_{終了日}.md`
+- 週次レビューとは別ファイル・別ディレクトリに保存されるため、週次サイクル（archive/weekly・weekly_review.md）には一切影響しない
+- アプリの「レポート」タブから開始日・終了日を入力して実行できる
 
 ---
 
