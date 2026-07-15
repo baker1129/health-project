@@ -27,6 +27,7 @@ health-project/
 │       ├── weekly_review.md     # 最新週次振り返り
 │       └── archive/weekly/      # 過去の週次レビュー
 ├── scripts/
+│   ├── goals.py                 # 体重の段階目標（GOALS）定義。他スクリプトの共有元
 │   ├── analyze_health.py        # メイン分析（血圧リスク・相関・パターン検出）
 │   ├── plot_weight.py           # 体重グラフ生成
 │   ├── plot_blood_pressure.py   # 血圧グラフ生成
