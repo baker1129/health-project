@@ -88,6 +88,7 @@ function saveDraft(date) {
     dinner:     $('dinner').value,
     foodNote:   $('food-note').value,
     exercise:   $('exercise').value,
+    savedAt:    Date.now(),
   };
   const hasData = !!(
     draft.weight || draft.bodyfat ||
@@ -110,10 +111,20 @@ function persistDrafts() {
   localStorage.setItem('health_drafts', JSON.stringify(drafts));
 }
 
+// 1日(24時間)より古い下書きは、他経路での更新を古い内容で上書きしてしまう
+// リスクを避けるため復元せず破棄する
+const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 function restoreDrafts() {
   try {
     const saved = JSON.parse(localStorage.getItem('health_drafts') || '{}');
-    Object.assign(drafts, saved);
+    const cutoff = Date.now() - DRAFT_MAX_AGE_MS;
+    for (const [date, draft] of Object.entries(saved)) {
+      if (draft.savedAt && draft.savedAt >= cutoff) {
+        drafts[date] = draft;
+      }
+    }
+    persistDrafts(); // 破棄した古い下書きをlocalStorageからも取り除く
   } catch (e) {
     console.error('draft restore error:', e);
   }
