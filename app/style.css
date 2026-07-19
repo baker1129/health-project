@@ -148,6 +148,22 @@ input[type="radio"] {
 .submit-btn:active  { opacity: 0.75; }
 .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ── Delete button ── */
+.danger-btn {
+  width: 100%;
+  padding: 12px;
+  background: none;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.danger-btn:active  { opacity: 0.6; }
+.danger-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* ── Message ── */
 .msg {
   padding: 12px 16px;

@@ -42,6 +42,13 @@ function showMsg(text, type = 'info') {
 function setLoading(on) {
   $('submit-btn').disabled = on;
   $('submit-btn').textContent = on ? '送信中...' : '記録する';
+  $('delete-btn').disabled = on;
+}
+
+function setDeleteLoading(on) {
+  $('delete-btn').disabled = on;
+  $('delete-btn').textContent = on ? '削除中...' : 'この日の記録を削除';
+  $('submit-btn').disabled = on;
 }
 
 // ── Date ─────────────────────────────────────────────────────────────────────
@@ -235,6 +242,22 @@ function upsertBP(src, date, time, bp1text, bp2text, memo) {
   return lines.join('\n');
 }
 
+function deleteWeightRow(src, date) {
+  const lines = src.split('\n');
+  const i = lines.findIndex(l => l.startsWith(date + ','));
+  if (i === -1) return null;
+  lines.splice(i, 1);
+  return lines.join('\n');
+}
+
+function deleteBPRow(src, date, time) {
+  const lines = src.split('\n');
+  const i = lines.findIndex(l => l.startsWith(`${date},${time},`));
+  if (i === -1) return null;
+  lines.splice(i, 1);
+  return lines.join('\n');
+}
+
 function toList(text) {
   if (!text || !text.trim()) return '';
   if (text.trim() === 'なし') return '- なし\n';
@@ -294,6 +317,25 @@ function upsertMdSection(src, date, newSection) {
     return before.trimEnd() + '\n\n' + newSection.trimEnd() + '\n';
   }
   return before.trimEnd() + '\n\n' + newSection.trimEnd() + sep + after.trimStart();
+}
+
+// 指定日のセクション全体を削除する（見つからなければnull＝変更なし）
+function deleteMdSection(src, date) {
+  const marker = `## ${date}`;
+  const si = src.indexOf(marker);
+  if (si === -1) return null;
+
+  const useHr  = src.includes('\n---\n');
+  const sep    = useHr ? '\n\n---\n\n' : '\n\n';
+  const rest   = src.slice(si + marker.length);
+  const nextH2 = rest.search(/\n## /);
+  const after  = nextH2 === -1 ? '' : rest.slice(nextH2 + 1);
+  const before = src.slice(0, si).trimEnd();
+
+  if (!before && !after) return '\n';
+  if (!before) return after.trimStart();
+  if (!after)  return before + '\n';
+  return before + sep + after.trimStart();
 }
 
 // ── Existing data parsers ─────────────────────────────────────────────────────
@@ -365,9 +407,10 @@ async function loadForDate(date) {
   }
 
   setLoadIndicator(true);
-  // 既存データの取得が終わるまでは送信をブロックする（未取得のフィールドが
+  // 既存データの取得が終わるまでは送信・削除をブロックする（未取得のフィールドが
   // 空のまま送信され、記録済みの内容を上書き消去してしまうのを防ぐ）
   $('submit-btn').disabled = true;
+  $('delete-btn').disabled = true;
 
   try {
     const [wFile, bpFile, mealsFile, exFile] = await Promise.all([
@@ -418,6 +461,7 @@ async function loadForDate(date) {
 
   setLoadIndicator(false);
   $('submit-btn').disabled = false;
+  $('delete-btn').disabled = false;
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────────
@@ -518,6 +562,114 @@ async function submitExercise(datesToSubmit, dateLabel) {
   } catch (e) {
     return { label: '運動', status: 'error', message: e.message };
   }
+}
+
+// ── Delete (指定日の記録を4ファイルから削除) ────────────────────────────────────
+
+async function deleteWeightForDate(date) {
+  try {
+    const status = await putUpsertWithRetry(
+      'logs/daily/weight.csv',
+      (cur) => deleteWeightRow(cur, date),
+      `Delete 体重 for ${date}`
+    );
+    return { label: '体重', status };
+  } catch (e) {
+    return { label: '体重', status: 'error', message: e.message };
+  }
+}
+
+async function deleteBPForDate(date) {
+  try {
+    const status = await putUpsertWithRetry(
+      'logs/daily/blood_pressure.csv',
+      (cur) => {
+        let changed = false;
+        const am = deleteBPRow(cur, date, 'morning');
+        if (am) { cur = am; changed = true; }
+        const pm = deleteBPRow(cur, date, 'night');
+        if (pm) { cur = pm; changed = true; }
+        return changed ? cur : null;
+      },
+      `Delete BP for ${date}`
+    );
+    return { label: '血圧', status };
+  } catch (e) {
+    return { label: '血圧', status: 'error', message: e.message };
+  }
+}
+
+async function deleteMealsForDate(date) {
+  try {
+    const status = await putUpsertWithRetry(
+      'logs/lifestyle/meals.md',
+      (cur) => deleteMdSection(cur, date),
+      `Delete 食事 for ${date}`
+    );
+    return { label: '食事', status };
+  } catch (e) {
+    return { label: '食事', status: 'error', message: e.message };
+  }
+}
+
+async function deleteExerciseForDate(date) {
+  try {
+    const status = await putUpsertWithRetry(
+      'logs/lifestyle/exercise.md',
+      (cur) => deleteMdSection(cur, date),
+      `Delete 運動 for ${date}`
+    );
+    return { label: '運動', status };
+  } catch (e) {
+    return { label: '運動', status: 'error', message: e.message };
+  }
+}
+
+async function deleteRecord() {
+  if (!cfg.token) {
+    showMsg('⚙️ 設定から GitHub Token を入力してください', 'error');
+    openSettings();
+    return;
+  }
+
+  const date = currentDate;
+  if (!date) return;
+  if (!confirm(`${date} の記録（体重・血圧・食事・運動）を削除します。よろしいですか？`)) return;
+
+  delete drafts[date];
+  persistDrafts();
+
+  setDeleteLoading(true);
+  showMsg('削除中...', 'info');
+
+  const results = await Promise.all([
+    deleteWeightForDate(date),
+    deleteBPForDate(date),
+    deleteMealsForDate(date),
+    deleteExerciseForDate(date),
+  ]);
+
+  const deleted = [], errors = [];
+  for (const r of results) {
+    if (r.status === 'updated') deleted.push(r.label);
+    else if (r.status === 'error') errors.push(`${r.label}: ${r.message}`);
+  }
+
+  setDeleteLoading(false);
+
+  if (errors.length > 0) {
+    showMsg('❌ エラー:\n' + errors.join('\n'), 'error');
+    return;
+  }
+
+  chartRawData = null;
+  if (deleted.length) {
+    showMsg(`🗑️ 削除しました(${date}): ` + deleted.join('・'), 'success');
+  } else {
+    showMsg(`${date} には削除できる記録がありませんでした`, 'info');
+  }
+
+  loadForDate(date);
 }
 
 async function submit() {
@@ -1008,6 +1160,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('date').value = currentDate;
 
   $('submit-btn').addEventListener('click', submit);
+  $('delete-btn').addEventListener('click', deleteRecord);
   $('settings-btn').addEventListener('click', openSettings);
   $('save-settings-btn').addEventListener('click', () => {
     saveSettings();
