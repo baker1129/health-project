@@ -39,16 +39,32 @@ function showMsg(text, type = 'info') {
   if (type === 'success') setTimeout(() => { el.className = 'msg hidden'; }, 5000);
 }
 
+// 削除ボタンは「その日の記録が実際にGitHub上にあると確認できている」場合のみ
+// 有効化する。未確認・空・読み込み失敗のときは常に無効（誤タップ防止）。
+const hadRemoteData = {};
+
+function refreshDeleteButtonState() {
+  $('delete-btn').disabled = !hadRemoteData[currentDate];
+}
+
 function setLoading(on) {
   $('submit-btn').disabled = on;
   $('submit-btn').textContent = on ? '送信中...' : '記録する';
-  $('delete-btn').disabled = on;
+  if (on) {
+    $('delete-btn').disabled = true;
+  } else {
+    refreshDeleteButtonState();
+  }
 }
 
 function setDeleteLoading(on) {
-  $('delete-btn').disabled = on;
   $('delete-btn').textContent = on ? '削除中...' : 'この日の記録を削除';
   $('submit-btn').disabled = on;
+  if (on) {
+    $('delete-btn').disabled = true;
+  } else {
+    refreshDeleteButtonState();
+  }
 }
 
 // ── Date ─────────────────────────────────────────────────────────────────────
@@ -403,6 +419,7 @@ async function loadForDate(date) {
 
   if (drafts[date]) {
     applyDraft(drafts[date]);
+    refreshDeleteButtonState();
     return;
   }
 
@@ -448,6 +465,8 @@ async function loadForDate(date) {
           .map(l => l.trim().slice(2).trim()).filter(Boolean).join('、')
       : '';
 
+    hadRemoteData[date] = !!(w || am || pm || mealsSection || exSection);
+
   } catch (e) {
     console.error('load error:', e);
     const is401 = e.message && e.message.includes(': 401');
@@ -461,7 +480,7 @@ async function loadForDate(date) {
 
   setLoadIndicator(false);
   $('submit-btn').disabled = false;
-  $('delete-btn').disabled = false;
+  refreshDeleteButtonState();
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────────
@@ -625,6 +644,32 @@ async function deleteExerciseForDate(date) {
   }
 }
 
+// 確認ダイアログに表示する「今まさに画面に出ている内容」のプレビュー。
+// 削除は日付をキーに実データを消す操作なので、日付を見間違えたまま
+// 確認ダイアログをそのまま押してしまう事故を防ぐのが目的。
+function buildDeletePreviewLines() {
+  const lines = [];
+  const weight = $('weight').value;
+  if (weight) {
+    const bodyfat = $('bodyfat').value;
+    lines.push(`体重: ${weight}kg${bodyfat ? ` / 体脂肪 ${bodyfat}%` : ''}`);
+  }
+  const cpap = getRadio('cpap');
+  const amBp1 = $('am-bp1').value;
+  if (amBp1 || cpap) {
+    lines.push(`朝血圧: ${amBp1 || '(未計測)'}${cpap ? ` / CPAP:${cpap}` : ''}`);
+  }
+  const pmBp1 = $('pm-bp1').value;
+  if (pmBp1) lines.push(`夜血圧: ${pmBp1}`);
+  const meals = [];
+  if ($('breakfast').value) meals.push(`朝:${$('breakfast').value}`);
+  if ($('lunch').value)     meals.push(`昼:${$('lunch').value}`);
+  if ($('dinner').value)    meals.push(`夜:${$('dinner').value}`);
+  if (meals.length) lines.push(`食事: ${meals.join(' ')}`);
+  if ($('exercise').value) lines.push(`運動: ${$('exercise').value}`);
+  return lines;
+}
+
 async function deleteRecord() {
   if (!cfg.token) {
     showMsg('⚙️ 設定から GitHub Token を入力してください', 'error');
@@ -634,7 +679,10 @@ async function deleteRecord() {
 
   const date = currentDate;
   if (!date) return;
-  if (!confirm(`${date} の記録（体重・血圧・食事・運動）を削除します。よろしいですか？`)) return;
+
+  const preview = buildDeletePreviewLines();
+  const previewText = preview.length ? preview.join('\n') : '（表示されている記録はありません）';
+  if (!confirm(`${date} の以下の記録を削除します。よろしいですか？\n\n${previewText}`)) return;
 
   delete drafts[date];
   persistDrafts();
@@ -658,7 +706,10 @@ async function deleteRecord() {
   setDeleteLoading(false);
 
   if (errors.length > 0) {
-    showMsg('❌ エラー:\n' + errors.join('\n'), 'error');
+    const parts = [];
+    if (deleted.length) parts.push('✅ 削除済み: ' + deleted.join('・'));
+    parts.push('❌ エラー:\n' + errors.join('\n'));
+    showMsg(parts.join('\n\n'), 'error');
     return;
   }
 
@@ -669,7 +720,9 @@ async function deleteRecord() {
     showMsg(`${date} には削除できる記録がありませんでした`, 'info');
   }
 
-  loadForDate(date);
+  // 削除中に日付欄が別の日に変更されていた場合、今表示中のフォームを
+  // 削除済みの古い日付のデータで上書きしないようにする
+  if (currentDate === date) loadForDate(date);
 }
 
 async function submit() {

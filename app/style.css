@@ -151,6 +151,7 @@ input[type="radio"] {
 /* ── Delete button ── */
 .danger-btn {
   width: 100%;
+  margin-top: 8px;
   padding: 12px;
   background: none;
   color: var(--danger);
