@@ -186,6 +186,21 @@ async function ghGet(path) {
   return { content: fromB64(d.content), sha: d.sha };
 }
 
+// 読み込み(GET)は書き込みと違いリトライがなく、一時的な通信不調がそのまま
+// 画面のエラー表示に直結していたため、書き込み側(putUpsertWithRetry)と同様の
+// 軽いリトライを入れる。401(トークン無効)は再試行しても直らないので即throw。
+async function ghGetWithRetry(path, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await ghGet(path);
+    } catch (e) {
+      const is401 = e.message && e.message.includes(': 401');
+      if (is401 || attempt >= maxAttempts) throw e;
+      await new Promise(res => setTimeout(res, 300 * attempt));
+    }
+  }
+}
+
 async function ghPut(path, content, sha, message) {
   const r = await fetch(`${API}/repos/${cfg.owner}/${cfg.repo}/contents/${path}`, {
     method: 'PUT',
@@ -431,10 +446,10 @@ async function loadForDate(date) {
 
   try {
     const [wFile, bpFile, mealsFile, exFile] = await Promise.all([
-      ghGet('logs/daily/weight.csv'),
-      ghGet('logs/daily/blood_pressure.csv'),
-      ghGet('logs/lifestyle/meals.md'),
-      ghGet('logs/lifestyle/exercise.md'),
+      ghGetWithRetry('logs/daily/weight.csv'),
+      ghGetWithRetry('logs/daily/blood_pressure.csv'),
+      ghGetWithRetry('logs/lifestyle/meals.md'),
+      ghGetWithRetry('logs/lifestyle/exercise.md'),
     ]);
 
     const w = parseWeight(wFile.content, date);
@@ -1034,8 +1049,8 @@ async function loadAndRenderCharts(forceRefresh = false) {
     loadEl.classList.remove('hidden');
     try {
       const [wFile, bpFile] = await Promise.all([
-        ghGet('logs/daily/weight.csv'),
-        ghGet('logs/daily/blood_pressure.csv'),
+        ghGetWithRetry('logs/daily/weight.csv'),
+        ghGetWithRetry('logs/daily/blood_pressure.csv'),
       ]);
       chartRawData = {
         weight: parseWeightRows(wFile.content),
