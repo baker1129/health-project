@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -164,6 +165,23 @@ def load_meals(start: date, end: date) -> dict:
         "snack_days": snack_days,
         "no_breakfast_days": no_breakfast,
     }
+
+
+def load_meals_text(start: date, end: date) -> str:
+    """AI分析用に、期間内の食事日記を生データのまま連結して返す。"""
+    if not MEALS_MD.exists():
+        return ""
+    text = MEALS_MD.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    sections = re.split(r"\n(?=## \d{4}-\d{2}-\d{2})", text)
+    blocks = []
+    for section in sections:
+        dm = re.match(r"## (\d{4}-\d{2}-\d{2})", section)
+        if not dm:
+            continue
+        d = date.fromisoformat(dm.group(1))
+        if start <= d <= end:
+            blocks.append(section.strip())
+    return "\n\n".join(blocks)
 
 
 def load_prev_week_avg(week_start: date) -> float | None:
@@ -375,7 +393,7 @@ def build_analysis(
 
 
 # ---------------------------------------------------------------------------
-# 良かったこと・ダメだったこと・来週の作戦
+# 良かったこと・意識するといいこと・来週の作戦
 # ---------------------------------------------------------------------------
 
 def _walk_goal_days(w_avg: float) -> int:
@@ -432,7 +450,7 @@ def build_good_points(
     return "\n".join(f"- {p}" for p in points) if points else "- （特記なし）"
 
 
-def build_bad_points(
+def build_mindful_points(
     w_df: pd.DataFrame,
     bp_morning: pd.DataFrame,
     meals: dict,
@@ -440,42 +458,45 @@ def build_bad_points(
     record_days: int,
     w_diff: float | None,
 ) -> str:
+    """「ダメだったこと」ではなく、次に意識するとより良くなりそうな点を挙げる。
+    失敗の指摘ではなく気づきの提示を目的とする。"""
     points = []
     w_avg = w_df["weight"].mean() if not w_df.empty else None
 
     if len(w_df) < 5:
-        points.append(f"体重記録 {len(w_df)} 日（目標5日以上に未達）")
+        points.append(f"体重記録は {len(w_df)} 日。毎日記録できると変化がより見えやすくなりそう")
 
     if w_diff is not None and w_diff > 0.5:
-        points.append(f"週平均が前週より {w_diff:+.1f} kg 増加")
+        points.append(f"週平均が前週より {w_diff:+.1f} kg 増加。食事量やタイミングを意識するとまた減少に転じやすい")
 
     if not bp_morning.empty:
         avg_sys = bp_morning["systolic"].mean()
         avg_dia = bp_morning["diastolic"].mean()
         if avg_sys >= 140 or avg_dia >= 90:
-            points.append(f"朝血圧 {avg_sys:.0f}/{avg_dia:.0f} mmHg（高め・受診検討）")
+            points.append(f"朝血圧が {avg_sys:.0f}/{avg_dia:.0f} mmHg と高め。塩分や睡眠を意識しつつ、続くようなら受診も検討を")
         elif avg_sys >= 130 or avg_dia >= 85:
-            points.append(f"朝血圧 {avg_sys:.0f}/{avg_dia:.0f} mmHg（やや高め）")
+            points.append(f"朝血圧が {avg_sys:.0f}/{avg_dia:.0f} mmHg とやや高め。引き続き塩分・睡眠の質を意識すると良さそう")
 
     if not bp_morning.empty and "memo" in bp_morning.columns:
         off_count = bp_morning["memo"].str.contains("cpap:off", na=False).sum()
         if off_count >= 1:
-            points.append(f"CPAP未着用 {off_count} 日")
+            points.append(f"CPAP未着用が {off_count} 日。装着を意識すると睡眠の質が上がりやすい")
 
     if meals["night_snack_days"] >= 1:
-        points.append(f"夜食 {meals['night_snack_days']} 日")
+        points.append(f"夜食が {meals['night_snack_days']} 日。就寝前の時間の使い方を意識するとさらに良くなりそう")
+
     if meals["snack_days"] >= 1:
-        points.append(f"間食 {meals['snack_days']} 日")
+        points.append(f"間食が {meals['snack_days']} 日。悪いことではないので、内容やタイミングを意識するとさらに良くなりそう")
 
     if meals["no_breakfast_days"] >= 3:
-        points.append(f"朝食なし {meals['no_breakfast_days']} 日（多め）")
+        points.append(f"朝食なしが {meals['no_breakfast_days']} 日と多め。簡単なものでも口にする習慣を意識すると良さそう")
 
     ex_days   = len(exercise)
     goal_days = _walk_goal_days(w_avg) if w_avg is not None else 3
     if ex_days == 0:
-        points.append("運動なし")
+        points.append("運動なしの週。10分だけでも歩く習慣を意識すると良さそう")
     elif ex_days < goal_days:
-        points.append(f"運動 {ex_days} 日（目標 {goal_days} 日以上に未達）")
+        points.append(f"運動は {ex_days} 日（目標 {goal_days} 日）。もう少し日数を増やせるとさらに良くなりそう")
 
     return "\n".join(f"- {p}" for p in points) if points else "- （特記なし）"
 
@@ -500,7 +521,7 @@ def build_next_strategy(
 
         if w_diff is not None:
             if w_diff > 0.5:
-                strategies.append("食事量・夜間の間食を見直す")
+                strategies.append("食事量・夜食のタイミングを意識する")
             elif abs(w_diff) <= 0.2 and len(exercise) < 3:
                 strategies.append("停滞気味のため運動量を増やす（10分でもOK）")
 
@@ -528,6 +549,168 @@ def build_next_strategy(
 
 
 # ---------------------------------------------------------------------------
+# AIによる「良かったこと」「意識するといいこと」生成
+# ---------------------------------------------------------------------------
+
+AI_SYSTEM_PROMPT = """あなたは個人の健康管理（体重・血圧の改善）をサポートする管理栄養士兼トレーナーです。
+ユーザーの1週間分の記録（体重・血圧・食事・運動の実データ）を分析し、
+「分析（総括）」「良かったこと」「意識するといいこと」「来週の作戦」の4つを作成してください。
+
+方針:
+- 体重は7日平均で判断する。日々の増減や記録が抜けた日を咎めない。
+- 間食を含め「〜をした/しなかった」という行動自体を良い・悪いと評価しない。間食は悪いことではなく、内容やタイミングを意識する対象として中立に扱う。
+- 外食の「回数」自体を多い・少ないと評価しない。外食は通勤等により発生する行動であり、回数の増減はユーザーの意思でコントロールしにくい。外食に触れる場合は、回数ではなく「その日食べた内容（メニュー）」を根拠にした助言に限定する。
+- 「ダメだったこと」「失敗」のような否定的な断定はしない。改善点は必ず「こうするとさらに良くなる」という前向きな提案の形で書く。
+- 実際に記録された食事内容（食品名）や運動内容（距離・時間）、体重目標の進捗を根拠に、具体的な栄養素・食品・運動の助言をする。記録にない一般論は書かない。
+- 血圧は朝の値を優先して評価する。
+- 食事記録がなければ食事についての助言はせず、体重・血圧・運動など他のデータから言えることに絞る。
+
+各項目の書き方と役割分担:
+- summary（分析＝総括）: 箇条書きにせず、2〜4文のつながった文章にする。体重・血圧の全体的な傾向を軸に、good_points・mindful_pointsの内容と矛盾しない、週全体を俯瞰した総括にする。詳細な個別助言はgood_points/mindful_points側に譲り、summaryは「今週はどんな週だったか」の要約に徹する。
+- good_points: この1週間で良かったこと・続けられていたことの振り返り。簡潔な1文の箇条書きを3〜5個程度。
+- mindful_points: この1週間の記録から見えた、次に意識するとさらに良くなりそうなことの振り返り。簡潔な1文の箇条書きを3〜5個程度。
+- next_strategy（来週の作戦）: 来週すぐ実行できる具体的な行動プラン。箇条書きで3〜4個程度。【体重目標の進捗】【運動目安】に記載の残りkgや目標日数など具体的な数値を踏まえつつ、今週実際にできていた食事・運動パターン（good_points/mindful_pointsで触れた内容）を土台にした、来週向けの前向きなアクションにする。mindful_pointsが「今週の振り返り」であるのに対し、next_strategyは「来週やる具体的なアクション」という役割の違いを意識し、内容が単純に重複しないようにする。"""
+
+AI_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {
+            "type": "string",
+            "description": "この1週間の総括。箇条書きではなく2〜4文の文章。good_points/mindful_pointsと整合する内容にする",
+        },
+        "good_points": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "この1週間で良かったこと・続けられていたことの箇条書き",
+        },
+        "mindful_points": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "次に意識するとさらに良くなりそうなことの箇条書き（否定的な断定は禁止）",
+        },
+        "next_strategy": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "来週すぐ実行できる具体的な行動プランの箇条書き（体重目標の進捗・運動目安を踏まえる）",
+        },
+    },
+    "required": ["summary", "good_points", "mindful_points", "next_strategy"],
+    "additionalProperties": False,
+}
+
+
+def _build_ai_context(
+    start: date,
+    end: date,
+    w_df: pd.DataFrame,
+    bp_morning: pd.DataFrame,
+    bp_night: pd.DataFrame,
+    meals: dict,
+    meals_text: str,
+    exercise: list[str],
+    w_diff: float | None,
+) -> str:
+    w_avg = w_df["weight"].mean() if not w_df.empty else None
+    weight_lines = (
+        "\n".join(f"- {r.date}: {r.weight}kg" for r in w_df.itertuples())
+        if not w_df.empty else "記録なし"
+    )
+
+    def bp_lines(df: pd.DataFrame) -> str:
+        if df.empty:
+            return "記録なし"
+        return "\n".join(
+            f"- {r.date}: {r.systolic:.0f}/{r.diastolic:.0f} mmHg（脈拍 {r.pulse:.0f}）"
+            for r in df.itertuples()
+        )
+
+    exercise_text = "\n".join(f"- {e}" for e in exercise) if exercise else "記録なし"
+
+    if w_avg is None:
+        goal_text = "データなし"
+    else:
+        goal_text = "最終目標を達成済み"
+        for target_kg, label in GOALS:
+            if w_avg > target_kg:
+                goal_text = f"次の目標「{label}」（{target_kg}kg）まであと {w_avg - target_kg:.1f}kg（週平均）"
+                break
+
+    goal_days = _walk_goal_days(w_avg) if w_avg is not None else 3
+
+    return f"""期間: {start} 〜 {end}
+
+【体重】(7日平均: {f"{w_avg:.1f}kg" if w_avg is not None else "データなし"} / 前週比: {f"{w_diff:+.1f}kg" if w_diff is not None else "比較不可"})
+{weight_lines}
+
+【体重目標の進捗】{goal_text}
+
+【朝血圧】
+{bp_lines(bp_morning)}
+
+【夜血圧】
+{bp_lines(bp_night)}
+
+【食事記録（生データ）】
+{meals_text or "記録なし"}
+
+【食事の集計】外食 {meals['eating_out']}回 / 夜食あり {meals['night_snack_days']}日 / 間食あり {meals['snack_days']}日 / 朝食なし {meals['no_breakfast_days']}日
+
+【運動記録】
+{exercise_text}
+
+【運動目安】週 {goal_days} 日以上のウォーキングが目安（今週の実施: {len(exercise)} 日）"""
+
+
+def generate_ai_insights(
+    start: date,
+    end: date,
+    w_df: pd.DataFrame,
+    bp_morning: pd.DataFrame,
+    bp_night: pd.DataFrame,
+    meals: dict,
+    meals_text: str,
+    exercise: list[str],
+    w_diff: float | None,
+) -> tuple[str, str, str, str] | None:
+    """食事・運動の実データをAIに分析させ、(分析総括, 良かったこと, 意識するといいこと, 来週の作戦) を返す。
+    分析総括は文章、良かったこと・意識するといいこと・来週の作戦はMarkdown箇条書き。
+    APIキー未設定やAPIエラーなど、失敗時はNoneを返す（呼び出し側は閾値ベースの生成にフォールバックする）。"""
+    try:
+        import anthropic
+    except ImportError:
+        return None
+
+    context = _build_ai_context(start, end, w_df, bp_morning, bp_night, meals, meals_text, exercise, w_diff)
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-opus-4-8",
+        max_tokens=2048,
+        system=AI_SYSTEM_PROMPT,
+        thinking={"type": "adaptive"},
+        output_config={
+            "effort": "medium",
+            "format": {"type": "json_schema", "schema": AI_OUTPUT_SCHEMA},
+        },
+        messages=[{"role": "user", "content": context}],
+    )
+
+    text = next((b.text for b in response.content if b.type == "text"), None)
+    if not text:
+        return None
+    data = json.loads(text)
+    summary        = (data.get("summary") or "").strip()
+    good_points    = data.get("good_points") or []
+    mindful_points = data.get("mindful_points") or []
+    next_strategy  = data.get("next_strategy") or []
+    analysis_sec = summary if summary else "- （特記なし）"
+    good_sec     = "\n".join(f"- {p}" for p in good_points) if good_points else "- （特記なし）"
+    mindful_sec  = "\n".join(f"- {p}" for p in mindful_points) if mindful_points else "- （特記なし）"
+    strategy_sec = "\n".join(f"- {p}" for p in next_strategy) if next_strategy else "- 現状維持を継続"
+    return analysis_sec, good_sec, mindful_sec, strategy_sec
+
+
+# ---------------------------------------------------------------------------
 # レビュー本文生成
 # ---------------------------------------------------------------------------
 
@@ -537,6 +720,7 @@ def build_review(week_num: int, start: date, end: date) -> str:
     bp_morning = bp_df[bp_df["time"] == "morning"]
     bp_night   = bp_df[bp_df["time"] == "night"]
     meals     = load_meals(start, end)
+    meals_text = load_meals_text(start, end)
     exercise  = load_exercise(start, end)
     record_days = (end - start).days + 1
 
@@ -547,14 +731,22 @@ def build_review(week_num: int, start: date, end: date) -> str:
     bp_sec       = build_bp_section(bp_morning, bp_night)
     meals_sec    = build_meals_section(meals, record_days)
     exercise_sec = build_exercise_section(exercise)
-    analysis_sec = build_analysis(w_df, bp_morning, bp_night, meals, exercise, w_diff)
-    good_sec     = build_good_points(w_df, bp_morning, meals, exercise, w_diff)
-    bad_sec      = build_bad_points(w_df, bp_morning, meals, exercise, record_days, w_diff)
-    strategy_sec = build_next_strategy(w_df, bp_morning, meals, exercise, w_diff)
 
-    w_avg_val    = w_df["weight"].mean() if not w_df.empty else 999.0
-    walk_days    = _walk_goal_days(w_avg_val)
-    min_goals    = f"- 体重記録：5日以上\n- 歩行：10分 × {walk_days}日以上"
+    try:
+        ai_result = generate_ai_insights(
+            start, end, w_df, bp_morning, bp_night, meals, meals_text, exercise, w_diff
+        )
+    except Exception as e:
+        print(f"AI分析に失敗したため閾値ベースの生成にフォールバックします: {e}")
+        ai_result = None
+
+    if ai_result is not None:
+        analysis_sec, good_sec, mindful_sec, strategy_sec = ai_result
+    else:
+        analysis_sec = build_analysis(w_df, bp_morning, bp_night, meals, exercise, w_diff)
+        good_sec     = build_good_points(w_df, bp_morning, meals, exercise, w_diff)
+        mindful_sec  = build_mindful_points(w_df, bp_morning, meals, exercise, record_days, w_diff)
+        strategy_sec = build_next_strategy(w_df, bp_morning, meals, exercise, w_diff)
 
     return f"""# Weekly Review
 
@@ -590,18 +782,13 @@ def build_review(week_num: int, start: date, end: date) -> str:
 ### 良かったこと
 {good_sec}
 
-### ダメだったこと
-{bad_sec}
+### 意識するといいこと
+{mindful_sec}
 
 ---
 
 ### 来週の作戦
 {strategy_sec}
-
----
-
-### 最低目標
-{min_goals}
 """
 
 
@@ -644,19 +831,13 @@ def build_next_template(next_week_num: int, next_start: date, next_end: date) ->
 ### 良かったこと
 -
 
-### ダメだったこと
+### 意識するといいこと
 -
 
 ---
 
 ### 来週の作戦
 -
-
----
-
-### 最低目標
-- 体重記録：5日以上
-- 歩行：10分 × 3日以上
 """
 
 

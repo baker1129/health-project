@@ -32,11 +32,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install pandas
+        run: pip install pandas anthropic
 
       - name: Generate weekly review
         env:
           TZ: Asia/Tokyo
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ "${{ inputs.force }}" = "true" ]; then
             python scripts/generate_weekly_review.py --force
