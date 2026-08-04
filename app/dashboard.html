@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>経過記録</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="statusline" id="statusline">読み込み中...</div>
+
+  <div class="masthead">
+    <span class="kicker">経過記録</span>
+    <span class="since mono" id="since-line"></span>
+  </div>
+
+  <div class="top-grid">
+    <div class="hero">
+      <div class="hero-top">
+        <div class="hero-main">
+          <div class="hero-figure">
+            <span class="hero-value mono" id="hero-value">—</span><span class="hero-unit">kg</span>
+          </div>
+          <div class="hero-delta" id="hero-delta"></div>
+        </div>
+        <div class="hero-spark" id="hero-spark"></div>
+      </div>
+    </div>
+
+    <div class="side-card">
+      <div>
+        <div class="label">体脂肪率</div>
+        <div class="side-figure"><span class="side-value mono" id="side-value">—</span><span class="side-unit">%</span></div>
+        <div class="side-delta" id="side-delta"></div>
+      </div>
+      <div class="side-spark" id="bf-spark"></div>
+    </div>
+  </div>
+
+  <div class="stat-rail">
+    <div class="stat-rail-item">
+      <span class="label">7日平均体重</span>
+      <span class="value mono" id="stat-weight-avg">—</span>
+    </div>
+    <div class="stat-rail-item">
+      <span class="label">BMI</span>
+      <span class="value mono" id="stat-bmi">—</span>
+    </div>
+    <div class="stat-rail-item">
+      <span class="label">開始時 BMI</span>
+      <span class="value mono" id="stat-bmi-start">—</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title" id="phase-title">—</div>
+        <div class="pnote" id="phase-note"></div>
+      </div>
+      <div class="pnext">
+        <div class="pnext-label" id="phase-next-label"></div>
+        <div class="pnext-value mono" id="phase-next-value"></div>
+      </div>
+    </div>
+    <div class="meter-track" id="meter-track">
+      <div class="meter-fill" id="meter-fill"></div>
+    </div>
+    <div class="milestone-caption mono" id="milestone-caption"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">日別記録</div>
+      <div class="month-nav">
+        <button id="month-prev" class="nav-btn" aria-label="前の月">‹</button>
+        <span id="month-label" class="month-label mono"></span>
+        <button id="month-next" class="nav-btn" aria-label="次の月">›</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="day-table" id="day-table"></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">月次サマリー</div>
+      <div class="card-head-controls">
+        <div class="month-nav">
+          <button id="year-prev" class="nav-btn" aria-label="前の年">‹</button>
+          <span id="year-label" class="month-label mono"></span>
+          <button id="year-next" class="nav-btn" aria-label="次の年">›</button>
+        </div>
+        <button id="month-summary-toggle" class="collapse-btn" aria-expanded="true" aria-controls="month-summary-body" aria-label="月次サマリーの表示切替">
+          <span class="chevron">▾</span>
+        </button>
+      </div>
+    </div>
+    <div id="month-summary-body">
+      <div class="table-wrap">
+        <table class="month-table">
+          <thead>
+            <tr>
+              <th>月</th>
+              <th>日数</th>
+              <th>平均体重</th>
+              <th>月末体重</th>
+              <th>前月比</th>
+              <th>平均体脂肪率</th>
+              <th>月末体脂肪率</th>
+            </tr>
+          </thead>
+          <tbody id="month-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-section">
+    <div class="chart-toolbar">
+      <div class="metric-toggle" role="tablist" aria-label="表示する指標">
+        <button class="metric-btn" data-metric="w" aria-pressed="true">体重</button>
+        <button class="metric-btn" data-metric="bf" aria-pressed="false">体脂肪率</button>
+      </div>
+      <div class="filters">
+        <button class="period-btn" data-days="14" aria-pressed="false">2週間</button>
+        <button class="period-btn" data-days="30" aria-pressed="false">1ヶ月</button>
+        <button class="period-btn" data-days="0" aria-pressed="true">全期間</button>
+      </div>
+    </div>
+
+    <div class="card chart-card-big">
+      <div class="card-head">
+        <div class="card-title" id="chart-title">体重推移</div>
+        <div class="legend" id="chart-legend"></div>
+      </div>
+      <div class="chart-box" id="main-chart-box">
+        <svg id="main-svg" viewBox="0 0 1000 360" preserveAspectRatio="none" role="img" aria-label="推移グラフ"></svg>
+        <div class="tooltip" id="main-tooltip"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="foot">体重・体脂肪率の経過記録 ・ GitHubのデータを直接参照しています</footer>
+</div>
+
+<script src="dashboard.js"></script>
+</body>
+</html>
