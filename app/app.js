@@ -43,6 +43,15 @@ function showMsg(text, type = 'info') {
 // 有効化する。未確認・空・読み込み失敗のときは常に無効（誤タップ防止）。
 const hadRemoteData = {};
 
+// ファイルごとの「その日にリモート側の値が存在した」記録。誤って登録した
+// フィールドを空にして送信したとき、単なる「未入力(変更なし)」と区別して
+// 明示的なクリアとして反映するために使う(submitXxx参照)。
+const hadRemoteWeight = {};
+const hadRemoteAmBp = {};
+const hadRemotePmBp = {};
+const hadRemoteMeals = {};
+const hadRemoteExercise = {};
+
 function refreshDeleteButtonState() {
   $('delete-btn').disabled = !hadRemoteData[currentDate];
 }
@@ -50,6 +59,7 @@ function refreshDeleteButtonState() {
 function setLoading(on) {
   $('submit-btn').disabled = on;
   $('submit-btn').textContent = on ? '送信中...' : '記録する';
+  $('reload-btn').disabled = on;
   if (on) {
     $('delete-btn').disabled = true;
   } else {
@@ -60,6 +70,7 @@ function setLoading(on) {
 function setDeleteLoading(on) {
   $('delete-btn').textContent = on ? '削除中...' : 'この日の記録を削除';
   $('submit-btn').disabled = on;
+  $('reload-btn').disabled = on;
   if (on) {
     $('delete-btn').disabled = true;
   } else {
@@ -429,10 +440,10 @@ function setLoadIndicator(on) {
   $('load-indicator').classList.toggle('hidden', !on);
 }
 
-async function loadForDate(date) {
+async function loadForDate(date, forceRefresh = false) {
   if (!cfg.token || !date) return;
 
-  if (drafts[date]) {
+  if (!forceRefresh && drafts[date]) {
     applyDraft(drafts[date]);
     refreshDeleteButtonState();
     return;
@@ -443,6 +454,7 @@ async function loadForDate(date) {
   // 空のまま送信され、記録済みの内容を上書き消去してしまうのを防ぐ）
   $('submit-btn').disabled = true;
   $('delete-btn').disabled = true;
+  $('reload-btn').disabled = true;
 
   try {
     const [wFile, bpFile, mealsFile, exFile] = await Promise.all([
@@ -480,6 +492,11 @@ async function loadForDate(date) {
           .map(l => l.trim().slice(2).trim()).filter(Boolean).join('、')
       : '';
 
+    hadRemoteWeight[date]   = !!w;
+    hadRemoteAmBp[date]     = !!am;
+    hadRemotePmBp[date]     = !!pm;
+    hadRemoteMeals[date]    = !!mealsSection;
+    hadRemoteExercise[date] = !!exSection;
     hadRemoteData[date] = !!(w || am || pm || mealsSection || exSection);
 
   } catch (e) {
@@ -495,7 +512,20 @@ async function loadForDate(date) {
 
   setLoadIndicator(false);
   $('submit-btn').disabled = false;
+  $('reload-btn').disabled = false;
   refreshDeleteButtonState();
+}
+
+// その日の未送信の下書きを破棄し、GitHub上の最新データを強制的に取り直す。
+// 携帯アプリ側で稀に読み込みが失敗・停止したままになるケースの手動リカバリ用。
+async function reloadForDate(date) {
+  if (!date) return;
+  if (drafts[date]) {
+    if (!confirm('この日の未送信の入力を破棄して、GitHubから読み込み直します。よろしいですか？')) return;
+    delete drafts[date];
+    persistDrafts();
+  }
+  await loadForDate(date, true);
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────────
@@ -513,7 +543,14 @@ async function submitWeight(datesToSubmit, dateLabel) {
         for (const date of datesToSubmit) {
           const d = drafts[date];
           const next = upsertWeight(cur, date, d.weight, d.bodyfat);
-          if (next) { cur = next; changed = true; }
+          if (next) {
+            cur = next; changed = true;
+          } else if (!d.weight && !d.bodyfat && hadRemoteWeight[date]) {
+            // 既存の記録を誤登録に気づいて全欄クリアして送信したケース。
+            // 「未入力=変更なし」と区別し、その日の行を明示的に削除する
+            const cleared = deleteWeightRow(cur, date);
+            if (cleared) { cur = cleared; changed = true; }
+          }
         }
         return changed ? cur : null;
       },
@@ -536,10 +573,18 @@ async function submitBP(datesToSubmit, dateLabel) {
           if (parseBP(d.amBp1) || d.cpap) {
             const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
             if (next) { cur = next; changed = true; }
+          } else if (hadRemoteAmBp[date]) {
+            // 朝の血圧・CPAPを誤登録に気づいて欄をクリアして送信したケース
+            const cleared = deleteBPRow(cur, date, 'morning');
+            if (cleared) { cur = cleared; changed = true; }
           }
           if (parseBP(d.pmBp1)) {
             const next = upsertBP(cur, date, 'night', d.pmBp1, d.pmBp2, '');
             if (next) { cur = next; changed = true; }
+          } else if (hadRemotePmBp[date]) {
+            // 夜の血圧を誤登録に気づいて欄をクリアして送信したケース
+            const cleared = deleteBPRow(cur, date, 'night');
+            if (cleared) { cur = cleared; changed = true; }
           }
         }
         return changed ? cur : null;
@@ -560,12 +605,19 @@ async function submitMeals(datesToSubmit, dateLabel) {
         let changed = false;
         for (const date of datesToSubmit) {
           const d = drafts[date];
-          const next = upsertMdSection(cur, date, buildMealsSection(date, {
+          const section = buildMealsSection(date, {
             breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
             note: d.foodNote, eatingOut: d.eatingOut,
             nightSnack: d.nightSnack, snack: d.snack,
-          }));
-          if (next) { cur = next; changed = true; }
+          });
+          const next = upsertMdSection(cur, date, section);
+          if (next) {
+            cur = next; changed = true;
+          } else if (!section && hadRemoteMeals[date]) {
+            // 誤登録に気づき全欄クリアして送信したケース。その日のセクション自体を削除する
+            const cleared = deleteMdSection(cur, date);
+            if (cleared) { cur = cleared; changed = true; }
+          }
         }
         return changed ? cur : null;
       },
@@ -585,8 +637,15 @@ async function submitExercise(datesToSubmit, dateLabel) {
         let changed = false;
         for (const date of datesToSubmit) {
           const d = drafts[date];
-          const next = upsertMdSection(cur, date, buildExerciseSection(date, d.exercise));
-          if (next) { cur = next; changed = true; }
+          const section = buildExerciseSection(date, d.exercise);
+          const next = upsertMdSection(cur, date, section);
+          if (next) {
+            cur = next; changed = true;
+          } else if (!section && hadRemoteExercise[date]) {
+            // 誤登録に気づき欄をクリアして送信したケース。その日のセクション自体を削除する
+            const cleared = deleteMdSection(cur, date);
+            if (cleared) { cur = cleared; changed = true; }
+          }
         }
         return changed ? cur : null;
       },
@@ -1229,6 +1288,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   $('submit-btn').addEventListener('click', submit);
   $('delete-btn').addEventListener('click', deleteRecord);
+  $('reload-btn').addEventListener('click', () => reloadForDate(currentDate));
   $('settings-btn').addEventListener('click', openSettings);
   $('save-settings-btn').addEventListener('click', () => {
     saveSettings();

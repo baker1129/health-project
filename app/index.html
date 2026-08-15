@@ -29,7 +29,10 @@
         <span class="field-label">日付</span>
         <input type="date" id="date">
       </label>
-      <div id="load-indicator" class="load-indicator hidden">読み込み中...</div>
+      <div class="load-row">
+        <div id="load-indicator" class="load-indicator hidden">読み込み中...</div>
+        <button id="reload-btn" class="reload-btn" title="この日のデータをGitHubから再読み込み">↻ 再読み込み</button>
+      </div>
     </section>
 
     <section class="card">
