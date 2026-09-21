@@ -48,76 +48,10 @@
     </section>
 
     <section class="card">
-      <h2 class="section-title">CPAP</h2>
-      <div class="field">
-        <span class="field-label">使用有無</span>
-        <div class="radio-group">
-          <label class="radio-label"><input type="radio" name="cpap" value="on"> on</label>
-          <label class="radio-label"><input type="radio" name="cpap" value="off"> off</label>
-          <label class="radio-label"><input type="radio" name="cpap" value="" checked> 未記録</label>
-        </div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2 class="section-title">血圧（朝）</h2>
+      <h2 class="section-title">気づき</h2>
       <label class="field">
-        <span class="field-label">1回目 <span class="unit">収縮期/拡張期/脈拍</span></span>
-        <input type="text" id="am-bp1" placeholder="131/81/77" inputmode="text" autocomplete="off">
-      </label>
-      <label class="field">
-        <span class="field-label">2回目</span>
-        <input type="text" id="am-bp2" placeholder="133/87/74" inputmode="text" autocomplete="off">
-      </label>
-    </section>
-
-    <section class="card">
-      <h2 class="section-title">血圧（夜）</h2>
-      <label class="field">
-        <span class="field-label">1回目 <span class="unit">収縮期/拡張期/脈拍</span></span>
-        <input type="text" id="pm-bp1" placeholder="122/81/72" inputmode="text" autocomplete="off">
-      </label>
-      <label class="field">
-        <span class="field-label">2回目</span>
-        <input type="text" id="pm-bp2" placeholder="120/80/70" inputmode="text" autocomplete="off">
-      </label>
-    </section>
-
-    <section class="card">
-      <h2 class="section-title">食事</h2>
-      <label class="field">
-        <span class="field-label">外食 <span class="unit">回</span></span>
-        <input type="number" id="eating-out" min="0" max="3" step="1" placeholder="0" inputmode="numeric">
-      </label>
-      <div class="field">
-        <span class="field-label">夜食</span>
-        <div class="radio-group">
-          <label class="radio-label"><input type="radio" name="night-snack" value="あり"> あり</label>
-          <label class="radio-label"><input type="radio" name="night-snack" value="なし"> なし</label>
-        </div>
-      </div>
-      <div class="field">
-        <span class="field-label">間食</span>
-        <div class="radio-group">
-          <label class="radio-label"><input type="radio" name="snack" value="あり"> あり</label>
-          <label class="radio-label"><input type="radio" name="snack" value="なし"> なし</label>
-        </div>
-      </div>
-      <label class="field">
-        <span class="field-label">朝食</span>
-        <input type="text" id="breakfast" placeholder="なし">
-      </label>
-      <label class="field">
-        <span class="field-label">昼食</span>
-        <input type="text" id="lunch" placeholder="サラダ、鶏汁">
-      </label>
-      <label class="field">
-        <span class="field-label">夕食</span>
-        <input type="text" id="dinner" placeholder="白飯、納豆">
-      </label>
-      <label class="field">
-        <span class="field-label">気づき</span>
-        <input type="text" id="food-note" placeholder="任意">
+        <span class="field-label">体重変動に関連しそうなメモ</span>
+        <input type="text" id="food-note" placeholder="外食続き・間食・寝不足など（任意）">
       </label>
     </section>
 
@@ -168,7 +102,7 @@
   <div id="report-view" class="hidden">
     <section class="card">
       <h2 class="section-title">週次レビュー（手動生成）</h2>
-      <p class="hint-text">通常は水曜夜の血圧記録で自動生成されます。入れ忘れた場合はここから今週分を生成できます。</p>
+      <p class="hint-text">通常は水曜日の体重記録で自動生成されます。入れ忘れた場合はここから今週分を生成できます。</p>
       <button id="weekly-report-btn" class="submit-btn">今週の週次レビューを生成</button>
     </section>
 

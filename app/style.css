@@ -115,23 +115,6 @@ input:focus {
   background: #fff;
 }
 
-/* ── Radio ── */
-.radio-group { display: flex; gap: 20px; }
-
-.radio-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 16px;
-  cursor: pointer;
-}
-
-input[type="radio"] {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--accent);
-}
-
 /* ── Submit button ── */
 .submit-btn {
   width: 100%;

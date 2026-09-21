@@ -22,16 +22,6 @@ let currentDate = '';
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
-function getRadio(name) {
-  return document.querySelector(`input[name="${name}"]:checked`)?.value || '';
-}
-
-function setRadio(name, value) {
-  const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
-  document.querySelectorAll(`input[name="${name}"]`).forEach(r => (r.checked = false));
-  if (el) el.checked = true;
-}
-
 function showMsg(text, type = 'info') {
   const el = $('msg');
   el.textContent = text;
@@ -47,9 +37,6 @@ const hadRemoteData = {};
 // フィールドを空にして送信したとき、単なる「未入力(変更なし)」と区別して
 // 明示的なクリアとして反映するために使う(submitXxx参照)。
 const hadRemoteWeight = {};
-const hadRemoteAmBp = {};
-const hadRemotePmBp = {};
-const hadRemoteMeals = {};
 const hadRemoteExercise = {};
 
 function refreshDeleteButtonState() {
@@ -109,28 +96,12 @@ function saveDraft(date) {
   const draft = {
     weight:     $('weight').value,
     bodyfat:    $('bodyfat').value,
-    amBp1:      $('am-bp1').value,
-    amBp2:      $('am-bp2').value,
-    cpap:       getRadio('cpap'),
-    pmBp1:      $('pm-bp1').value,
-    pmBp2:      $('pm-bp2').value,
-    eatingOut:  $('eating-out').value,
-    nightSnack: getRadio('night-snack'),
-    snack:      getRadio('snack'),
-    breakfast:  $('breakfast').value,
-    lunch:      $('lunch').value,
-    dinner:     $('dinner').value,
     foodNote:   $('food-note').value,
     exercise:   $('exercise').value,
     savedAt:    Date.now(),
   };
   const hasData = !!(
-    draft.weight || draft.bodyfat ||
-    draft.amBp1 || draft.amBp2 || draft.cpap ||
-    draft.pmBp1 || draft.pmBp2 ||
-    draft.eatingOut !== '' || draft.nightSnack || draft.snack ||
-    draft.breakfast || draft.lunch || draft.dinner ||
-    draft.foodNote || draft.exercise
+    draft.weight || draft.bodyfat || draft.foodNote || draft.exercise
   );
   if (hasData) {
     drafts[date] = draft;
@@ -167,17 +138,6 @@ function restoreDrafts() {
 function applyDraft(draft) {
   $('weight').value      = draft.weight;
   $('bodyfat').value     = draft.bodyfat;
-  $('am-bp1').value      = draft.amBp1;
-  $('am-bp2').value      = draft.amBp2;
-  setRadio('cpap', draft.cpap);
-  $('pm-bp1').value      = draft.pmBp1;
-  $('pm-bp2').value      = draft.pmBp2;
-  $('eating-out').value  = draft.eatingOut;
-  setRadio('night-snack', draft.nightSnack);
-  setRadio('snack', draft.snack);
-  $('breakfast').value   = draft.breakfast;
-  $('lunch').value       = draft.lunch;
-  $('dinner').value      = draft.dinner;
   $('food-note').value   = draft.foodNote;
   $('exercise').value    = draft.exercise;
 }
@@ -262,69 +222,12 @@ function upsertWeight(src, date, weight, bodyfat) {
   return lines.join('\n');
 }
 
-function parseBP(text) {
-  if (!text || !text.trim()) return null;
-  const p = text.trim().split('/').map(s => Number(s.trim()));
-  if (p.length !== 3 || p.some(isNaN)) return null;
-  return p;
-}
-
-function upsertBP(src, date, time, bp1text, bp2text, memo) {
-  const bp1 = parseBP(bp1text);
-  // 血圧未計測でもCPAPだけは記録できるよう、血圧欄は空のまま行を作る
-  if (!bp1 && !memo) return null;
-  const bp2 = bp1 ? (parseBP(bp2text) || bp1) : null;
-  const bpFields = bp1 ? [...bp1, ...bp2] : ['', '', '', '', '', ''];
-  const newRow = [date, time, ...bpFields, memo || ''].join(',');
-  const lines = src.split('\n');
-  const i = lines.findIndex(l => l.startsWith(`${date},${time},`));
-  if (i === -1) return src.trimEnd() + '\n' + newRow + '\n';
-  if (lines[i] === newRow) return null;
-  lines[i] = newRow;
-  return lines.join('\n');
-}
-
 function deleteWeightRow(src, date) {
   const lines = src.split('\n');
   const i = lines.findIndex(l => l.startsWith(date + ','));
   if (i === -1) return null;
   lines.splice(i, 1);
   return lines.join('\n');
-}
-
-function deleteBPRow(src, date, time) {
-  const lines = src.split('\n');
-  const i = lines.findIndex(l => l.startsWith(`${date},${time},`));
-  if (i === -1) return null;
-  lines.splice(i, 1);
-  return lines.join('\n');
-}
-
-function toList(text) {
-  if (!text || !text.trim()) return '';
-  if (text.trim() === 'なし') return '- なし\n';
-  return (
-    text
-      .split(/[、,，]/)
-      .map(s => s.trim())
-      .filter(Boolean)
-      .map(s => `- ${s}`)
-      .join('\n') + '\n'
-  );
-}
-
-function buildMealsSection(date, { breakfast, lunch, dinner, note, eatingOut, nightSnack, snack }) {
-  const hasEatingOut = eatingOut !== '' && eatingOut != null;
-  if (!breakfast && !lunch && !dinner && !note && !hasEatingOut && !nightSnack && !snack) return null;
-  let s = `## ${date}\n`;
-  if (hasEatingOut) s += `外食: ${eatingOut}回\n`;
-  if (nightSnack)   s += `夜食: ${nightSnack}\n`;
-  if (snack)        s += `間食: ${snack}\n`;
-  if (breakfast) s += `\n### 朝\n${toList(breakfast)}`;
-  if (lunch)     s += `\n### 昼\n${toList(lunch)}`;
-  if (dinner)    s += `\n### 夜\n${toList(dinner)}`;
-  if (note)      s += `\n### 気づき\n- ${note.trim()}\n`;
-  return s;
 }
 
 function buildExerciseSection(date, exercise) {
@@ -380,6 +283,57 @@ function deleteMdSection(src, date) {
   return before + sep + after.trimStart();
 }
 
+// `## date` セクション内の `### 気づき` サブセクションだけを追加/更新/削除する。
+// 外食・夜食・間食や朝食/昼食/夕食など、アプリでは扱わなくなった過去データには一切触れない。
+// セクション内に気づき以外何も残らなくなった場合のみ、日付セクションごと削除する。
+function upsertNoteSubsection(src, date, note) {
+  const trimmed = (note || '').trim();
+  const marker = `## ${date}`;
+  const si = src.indexOf(marker);
+  const noteMarker = '### 気づき';
+
+  if (si === -1) {
+    if (!trimmed) return null;
+    const useHr = src.includes('\n---\n');
+    const sep = useHr ? '\n\n---\n\n' : '\n\n';
+    return src.trimEnd() + sep + `${marker}\n\n${noteMarker}\n- ${trimmed}\n`;
+  }
+
+  const rest   = src.slice(si + marker.length);
+  const nextH2 = rest.search(/\n## /);
+  const body   = nextH2 === -1 ? rest : rest.slice(0, nextH2);
+  const tail   = nextH2 === -1 ? '' : rest.slice(nextH2);
+
+  const ni = body.indexOf(noteMarker);
+  let oldNote = '';
+  let bodyWithoutNote = body;
+  if (ni !== -1) {
+    const before = body.slice(0, ni);
+    const after  = body.slice(ni + noteMarker.length);
+    const nextH3 = after.search(/\n### /);
+    const noteBlock  = nextH3 === -1 ? after : after.slice(0, nextH3);
+    const afterNote  = nextH3 === -1 ? '' : after.slice(nextH3);
+    oldNote = noteBlock
+      .split('\n')
+      .filter(l => l.trim().startsWith('- '))
+      .map(l => l.trim().slice(2).trim())
+      .join('、');
+    bodyWithoutNote = before + afterNote;
+  }
+
+  if (oldNote === trimmed) return null;
+
+  let newBody = bodyWithoutNote.trimEnd();
+  if (trimmed) {
+    newBody += (newBody ? '\n\n' : '\n') + `${noteMarker}\n- ${trimmed}`;
+  }
+  newBody += '\n';
+
+  if (!newBody.trim()) return deleteMdSection(src, date);
+
+  return src.slice(0, si) + marker + newBody + tail;
+}
+
 // ── Existing data parsers ─────────────────────────────────────────────────────
 
 function parseWeight(src, date) {
@@ -389,35 +343,12 @@ function parseWeight(src, date) {
   return { weight: weight || '', bodyfat: (bodyfat || '').trim() };
 }
 
-function parseBPRow(src, date, time) {
-  const line = src.split('\n').find(l => l.startsWith(`${date},${time},`));
-  if (!line) return null;
-  const [,, s1, d1, p1, s2, d2, p2, ...memoParts] = line.split(',');
-  const hasBp1 = s1 !== '' && d1 !== '' && p1 !== '';
-  const hasBp2 = s2 !== '' && d2 !== '' && p2 !== '';
-  const bp1 = hasBp1 ? `${s1}/${d1}/${p1}` : '';
-  const bp2 = hasBp2 ? `${s2}/${d2}/${p2}` : '';
-  const memo = memoParts.join(',');
-  const cpap = memo.includes('cpap:on') ? 'on' : memo.includes('cpap:off') ? 'off' : '';
-  return { bp1, bp2: bp1 && bp1 === bp2 ? '' : bp2, cpap };
-}
-
 function parseDateSection(src, date) {
   const idx = src.indexOf(`## ${date}`);
   if (idx === -1) return null;
   const after = src.slice(idx + `## ${date}`.length);
   const end = after.search(/\n## /);
   return end === -1 ? after : after.slice(0, end);
-}
-
-function extractCount(section, key) {
-  const m = section.match(new RegExp(key + ': (\\d+)回'));
-  return m ? m[1] : '';
-}
-
-function extractYesNo(section, key) {
-  const m = section.match(new RegExp('^' + key + ': (あり|なし)', 'm'));
-  return m ? m[1] : '';
 }
 
 function extractSubsection(section, heading) {
@@ -457,9 +388,8 @@ async function loadForDate(date, forceRefresh = false) {
   $('reload-btn').disabled = true;
 
   try {
-    const [wFile, bpFile, mealsFile, exFile] = await Promise.all([
+    const [wFile, mealsFile, exFile] = await Promise.all([
       ghGetWithRetry('logs/daily/weight.csv'),
-      ghGetWithRetry('logs/daily/blood_pressure.csv'),
       ghGetWithRetry('logs/lifestyle/meals.md'),
       ghGetWithRetry('logs/lifestyle/exercise.md'),
     ]);
@@ -468,23 +398,9 @@ async function loadForDate(date, forceRefresh = false) {
     $('weight').value  = w?.weight  || '';
     $('bodyfat').value = w?.bodyfat || '';
 
-    const am = parseBPRow(bpFile.content, date, 'morning');
-    $('am-bp1').value = am?.bp1 || '';
-    $('am-bp2').value = am?.bp2 || '';
-    setRadio('cpap', am?.cpap || '');
-
-    const pm = parseBPRow(bpFile.content, date, 'night');
-    $('pm-bp1').value = pm?.bp1 || '';
-    $('pm-bp2').value = pm?.bp2 || '';
-
     const mealsSection = parseDateSection(mealsFile.content, date);
-    $('eating-out').value  = mealsSection ? extractCount(mealsSection, '外食') : '';
-    setRadio('night-snack', mealsSection ? extractYesNo(mealsSection, '夜食') : '');
-    setRadio('snack',       mealsSection ? extractYesNo(mealsSection, '間食') : '');
-    $('breakfast').value   = mealsSection ? extractSubsection(mealsSection, '朝')    : '';
-    $('lunch').value       = mealsSection ? extractSubsection(mealsSection, '昼')    : '';
-    $('dinner').value      = mealsSection ? extractSubsection(mealsSection, '夜')    : '';
-    $('food-note').value   = mealsSection ? extractSubsection(mealsSection, '気づき'): '';
+    const existingNote = mealsSection ? extractSubsection(mealsSection, '気づき') : '';
+    $('food-note').value = existingNote;
 
     const exSection = parseDateSection(exFile.content, date);
     $('exercise').value = exSection
@@ -493,11 +409,8 @@ async function loadForDate(date, forceRefresh = false) {
       : '';
 
     hadRemoteWeight[date]   = !!w;
-    hadRemoteAmBp[date]     = !!am;
-    hadRemotePmBp[date]     = !!pm;
-    hadRemoteMeals[date]    = !!mealsSection;
     hadRemoteExercise[date] = !!exSection;
-    hadRemoteData[date] = !!(w || am || pm || mealsSection || exSection);
+    hadRemoteData[date] = !!(w || existingNote || exSection);
 
   } catch (e) {
     console.error('load error:', e);
@@ -562,42 +475,7 @@ async function submitWeight(datesToSubmit, dateLabel) {
   }
 }
 
-async function submitBP(datesToSubmit, dateLabel) {
-  try {
-    const status = await putUpsertWithRetry(
-      'logs/daily/blood_pressure.csv',
-      (cur) => {
-        let changed = false;
-        for (const date of datesToSubmit) {
-          const d = drafts[date];
-          if (parseBP(d.amBp1) || d.cpap) {
-            const next = upsertBP(cur, date, 'morning', d.amBp1, d.amBp2, d.cpap ? `cpap:${d.cpap}` : '');
-            if (next) { cur = next; changed = true; }
-          } else if (hadRemoteAmBp[date]) {
-            // 朝の血圧・CPAPを誤登録に気づいて欄をクリアして送信したケース
-            const cleared = deleteBPRow(cur, date, 'morning');
-            if (cleared) { cur = cleared; changed = true; }
-          }
-          if (parseBP(d.pmBp1)) {
-            const next = upsertBP(cur, date, 'night', d.pmBp1, d.pmBp2, '');
-            if (next) { cur = next; changed = true; }
-          } else if (hadRemotePmBp[date]) {
-            // 夜の血圧を誤登録に気づいて欄をクリアして送信したケース
-            const cleared = deleteBPRow(cur, date, 'night');
-            if (cleared) { cur = cleared; changed = true; }
-          }
-        }
-        return changed ? cur : null;
-      },
-      `Update BP for ${dateLabel}`
-    );
-    return { label: '血圧', status };
-  } catch (e) {
-    return { label: '血圧', status: 'error', message: e.message };
-  }
-}
-
-async function submitMeals(datesToSubmit, dateLabel) {
+async function submitNote(datesToSubmit, dateLabel) {
   try {
     const status = await putUpsertWithRetry(
       'logs/lifestyle/meals.md',
@@ -605,27 +483,16 @@ async function submitMeals(datesToSubmit, dateLabel) {
         let changed = false;
         for (const date of datesToSubmit) {
           const d = drafts[date];
-          const section = buildMealsSection(date, {
-            breakfast: d.breakfast, lunch: d.lunch, dinner: d.dinner,
-            note: d.foodNote, eatingOut: d.eatingOut,
-            nightSnack: d.nightSnack, snack: d.snack,
-          });
-          const next = upsertMdSection(cur, date, section);
-          if (next) {
-            cur = next; changed = true;
-          } else if (!section && hadRemoteMeals[date]) {
-            // 誤登録に気づき全欄クリアして送信したケース。その日のセクション自体を削除する
-            const cleared = deleteMdSection(cur, date);
-            if (cleared) { cur = cleared; changed = true; }
-          }
+          const next = upsertNoteSubsection(cur, date, d.foodNote);
+          if (next) { cur = next; changed = true; }
         }
         return changed ? cur : null;
       },
-      `Update 食事 for ${dateLabel}`
+      `Update 気づき for ${dateLabel}`
     );
-    return { label: '食事', status };
+    return { label: '気づき', status };
   } catch (e) {
-    return { label: '食事', status: 'error', message: e.message };
+    return { label: '気づき', status: 'error', message: e.message };
   }
 }
 
@@ -672,36 +539,16 @@ async function deleteWeightForDate(date) {
   }
 }
 
-async function deleteBPForDate(date) {
-  try {
-    const status = await putUpsertWithRetry(
-      'logs/daily/blood_pressure.csv',
-      (cur) => {
-        let changed = false;
-        const am = deleteBPRow(cur, date, 'morning');
-        if (am) { cur = am; changed = true; }
-        const pm = deleteBPRow(cur, date, 'night');
-        if (pm) { cur = pm; changed = true; }
-        return changed ? cur : null;
-      },
-      `Delete BP for ${date}`
-    );
-    return { label: '血圧', status };
-  } catch (e) {
-    return { label: '血圧', status: 'error', message: e.message };
-  }
-}
-
-async function deleteMealsForDate(date) {
+async function deleteNoteForDate(date) {
   try {
     const status = await putUpsertWithRetry(
       'logs/lifestyle/meals.md',
-      (cur) => deleteMdSection(cur, date),
-      `Delete 食事 for ${date}`
+      (cur) => upsertNoteSubsection(cur, date, ''),
+      `Delete 気づき for ${date}`
     );
-    return { label: '食事', status };
+    return { label: '気づき', status };
   } catch (e) {
-    return { label: '食事', status: 'error', message: e.message };
+    return { label: '気づき', status: 'error', message: e.message };
   }
 }
 
@@ -728,18 +575,8 @@ function buildDeletePreviewLines() {
     const bodyfat = $('bodyfat').value;
     lines.push(`体重: ${weight}kg${bodyfat ? ` / 体脂肪 ${bodyfat}%` : ''}`);
   }
-  const cpap = getRadio('cpap');
-  const amBp1 = $('am-bp1').value;
-  if (amBp1 || cpap) {
-    lines.push(`朝血圧: ${amBp1 || '(未計測)'}${cpap ? ` / CPAP:${cpap}` : ''}`);
-  }
-  const pmBp1 = $('pm-bp1').value;
-  if (pmBp1) lines.push(`夜血圧: ${pmBp1}`);
-  const meals = [];
-  if ($('breakfast').value) meals.push(`朝:${$('breakfast').value}`);
-  if ($('lunch').value)     meals.push(`昼:${$('lunch').value}`);
-  if ($('dinner').value)    meals.push(`夜:${$('dinner').value}`);
-  if (meals.length) lines.push(`食事: ${meals.join(' ')}`);
+  const note = $('food-note').value;
+  if (note) lines.push(`気づき: ${note}`);
   if ($('exercise').value) lines.push(`運動: ${$('exercise').value}`);
   return lines;
 }
@@ -766,8 +603,7 @@ async function deleteRecord() {
 
   const results = await Promise.all([
     deleteWeightForDate(date),
-    deleteBPForDate(date),
-    deleteMealsForDate(date),
+    deleteNoteForDate(date),
     deleteExerciseForDate(date),
   ]);
 
@@ -824,8 +660,7 @@ async function submit() {
 
   const results = await Promise.all([
     submitWeight(datesToSubmit, dateLabel),
-    submitBP(datesToSubmit, dateLabel),
-    submitMeals(datesToSubmit, dateLabel),
+    submitNote(datesToSubmit, dateLabel),
     submitExercise(datesToSubmit, dateLabel),
   ]);
 
@@ -853,13 +688,9 @@ function clearForm() {
   Object.keys(drafts).forEach(k => delete drafts[k]);
   persistDrafts();
   chartRawData = null;
-  ['am-bp1','am-bp2','pm-bp1','pm-bp2','weight','bodyfat',
-   'eating-out','breakfast','lunch','dinner','food-note','exercise'].forEach(id => {
+  ['weight','bodyfat','food-note','exercise'].forEach(id => {
     $(id).value = '';
   });
-  setRadio('cpap', '');
-  setRadio('night-snack', '');
-  setRadio('snack', '');
   currentDate = todayLocal();
   $('date').value = currentDate;
   loadForDate(currentDate);

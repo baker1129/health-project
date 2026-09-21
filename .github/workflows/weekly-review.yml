@@ -5,11 +5,11 @@ on:
     branches:
       - main
     paths:
-      - 'logs/daily/blood_pressure.csv'
+      - 'logs/daily/weight.csv'
   workflow_dispatch:
     inputs:
       force:
-        description: '水曜日・夜血圧チェックをスキップして強制実行'
+        description: '水曜日・体重チェックをスキップして強制実行'
         type: boolean
         default: false
 

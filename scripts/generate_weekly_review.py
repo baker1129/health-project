@@ -1,5 +1,5 @@
 """
-水曜日の夜血圧入力をトリガーに週次レビューを生成・アーカイブするスクリプト。
+水曜日の体重記録をトリガーに週次レビューを生成・アーカイブするスクリプト。
 - archive/weekly/weekly_review_weekN.md にデータ分析付きで保存
 - logs/reviews/weekly_review.md を次週テンプレートに差し替え
 """
@@ -47,10 +47,10 @@ def should_run() -> bool:
     last_wednesday = today - timedelta(days=days_since_wed)
 
     wed_str = last_wednesday.isoformat()
-    df = pd.read_csv(BP_CSV)
-    has_night = not df[(df["date"] == wed_str) & (df["time"] == "night")].empty
-    if not has_night:
-        print(f"直近の水曜日（{wed_str}）の夜血圧がまだ入力されていません。スキップします。")
+    df = pd.read_csv(WEIGHT_CSV)
+    has_weight = not df[(df["date"] == wed_str) & df["weight"].notna()].empty
+    if not has_weight:
+        print(f"直近の水曜日（{wed_str}）の体重がまだ入力されていません。スキップします。")
         return False
 
     # 今週分のレビューがすでに生成済みならスキップ（無駄なコミット防止）

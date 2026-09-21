@@ -41,7 +41,7 @@ health-project/
 │   └── blood_pressure.png       # 自動生成：血圧グラフ
 ├── .github/workflows/
 │   ├── health-report.yml        # push時に自動レポート生成
-│   ├── weekly-review.yml        # 水曜夜血圧push時に週次レビュー生成
+│   ├── weekly-review.yml        # 水曜日の体重push時に週次レビュー生成
 │   └── custom-review.yml        # 任意期間のカスタムレポート生成（手動実行のみ）
 ├── requirements.txt
 └── CLAUDE.md
@@ -73,18 +73,20 @@ YYYY-MM-DD,morning/night,XXX,XX,XX,XXX,XX,XX,メモ
 - 血圧を測り忘れた日でもCPAPだけは記録できる。その場合 systolic1〜pulse2 は空欄にし、memoにcpap:on/offのみ記入する
   （例: `2026-07-11,morning,,,,,,,cpap:on`）
 
-### logs/lifestyle/meals.md（アプリ入力分）
+### logs/lifestyle/meals.md
 ```
 ## YYYY-MM-DD
 外食: N回
 夜食: あり/なし
 間食: あり/なし
+
+### 気づき
+- 体重変動に関連しそうなメモ
 ```
-- `外食`: 回数（任意）
-- `夜食`: 就寝前後の食事の有無（あり/なし）。当初は「夜食・間食」として回数で一括記録していたが、
-  間食だけの日でも夜食を取ったと誤判定される問題があったため、`夜食`と`間食`をそれぞれ「あり/なし」で分けて記録する形式に変更した
-- `間食`: 日中の間食の有無（あり/なし）
-- いずれも未記録の場合は行ごと省略
+- `外食`/`夜食`/`間食`、`### 朝`/`### 昼`/`### 夜`の箇条書きは**過去データの名残**。アプリ（`app/`）は現在これらを新規に書き込まず、`### 気づき`サブセクションのみを追加・更新・削除する
+- `### 気づき`: 体重変動に関連しそうな気づきの自由記述（任意）。アプリの「気づき」欄、またはチャット入力の`気づき:`から反映される
+- 食事記録自体を毎日つける必要はなく、書きたい時だけ`### 気づき`に残せばよい
+- チャット入力（`【日次記録】`テンプレート）経由では、従来通り朝食/昼食/夕食の内容を書くこともできる（任意）
 
 ---
 
@@ -99,7 +101,7 @@ YYYY-MM-DD,morning/night,XXX,XX,XX,XXX,XX,XX,メモ
 5. 自動コミット＆プッシュ（`[skip ci]` 付き）
 
 ### weekly-review.yml
-`logs/daily/blood_pressure.csv` への push 時（水曜夜血圧を検知）に自動実行：
+`logs/daily/weight.csv` への push 時（水曜日の体重記録を検知）に自動実行：
 - `generate_weekly_review.py` → `logs/reviews/weekly_review.md`
 - `--force` オプションで強制実行も可能（workflow_dispatch）。アプリの「レポート」タブ→「今週の週次レビューを生成」からも実行できる
 
